@@ -106,7 +106,8 @@ def _checkout_main(req: CheckoutRequest):
 
 def _checkout_validation_fix(req: CheckoutRequest):
     """PR variant — returns 400 instead of 500, but introduces regressions."""
-    with _conn() as conn:
+    conn = _conn()
+    try:
         row = conn.execute(
             "SELECT total, discount_code FROM carts WHERE id = %s", (req.cart_id,)
         ).fetchone()
@@ -122,11 +123,12 @@ def _checkout_validation_fix(req: CheckoutRequest):
         )
 
         if not req.address.get("street") or not req.address.get("city") or not req.address.get("zip"):
-            # BUG: rollback clears discount
+            # BUG: clears discount and commits before raising
             conn.execute(
                 "UPDATE carts SET discount_code = NULL, total = %s WHERE id = %s",
                 (int(total / 0.9) if discount_code else total, req.cart_id),
             )
+            conn.commit()
             raise HTTPException(
                 status_code=400,
                 detail="Address incomplete: street, city, and zip are required",
@@ -140,7 +142,10 @@ def _checkout_validation_fix(req: CheckoutRequest):
             "INSERT INTO orders (id, cart_id, total, status) VALUES (%s, %s, %s, 'confirmed')",
             (order_id, req.cart_id, total),
         )
-    return {"order_id": order_id, "status": "confirmed", "total": total}
+        conn.commit()
+        return {"order_id": order_id, "status": "confirmed", "total": total}
+    finally:
+        conn.close()
 
 
 # --- Scenario 2: Retry / duplicate job ---

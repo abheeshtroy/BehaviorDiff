@@ -1,0 +1,48 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: shop
+    ports:
+      - "55432:5432"
+    volumes:
+      - ./shop-api/seed.sql:/docker-entrypoint-initdb.d/seed.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 10
+
+  base:
+    build: ./shop-api
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/shop
+      PAYMENT_URL: http://payment-mock:9090
+      VARIANT: main
+    ports:
+      - "8001:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  target:
+    build: ./shop-api
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/shop
+      PAYMENT_URL: http://payment-mock:9090
+      VARIANT: fix/checkout-validation
+    ports:
+      - "8002:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  payment-mock:
+    image: python:3.12-slim
+    command: python /mock/server.py
+    volumes:
+      - ./payment-mock.py:/mock/server.py
+    ports:
+      - "9090:9090"
