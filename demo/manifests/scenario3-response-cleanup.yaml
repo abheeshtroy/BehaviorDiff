@@ -1,0 +1,37 @@
+app:
+  name: shop-api
+  start: uvicorn app.main:app --host 0.0.0.0 --port 8000
+  port: 8000
+  healthcheck: /health
+  dockerfile: Dockerfile
+
+database:
+  type: postgres
+  seed: seed.sql
+  observe_tables:
+    - orders
+
+compare:
+  base_ref: main
+  target_ref: fix/response-cleanup
+  repo: demo/shop-api
+
+workflows:
+  - name: create-order-then-read
+    steps:
+      - method: POST
+        path: /api/carts
+        body: {"items": [{"sku": "SHOE-42", "qty": 1}]}
+        capture: {"cart_id": "$.cart_id"}
+      - method: POST
+        path: /api/checkout
+        body: {"cart_id": "{cart_id}", "address": {"street": "123 Main", "city": "SF", "zip": "94102"}}
+        capture: {"order_id": "$.order_id"}
+      - method: GET
+        path: /api/orders/{order_id}
+
+normalize:
+  uuid_fields:
+    - "*.cart_id"
+    - "*.order_id"
+    - "*.id"
