@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 import time
 from pathlib import Path
@@ -11,11 +10,10 @@ from pathlib import Path
 import structlog
 
 from engine.manifest import load_manifest, ManifestError
-from engine.orchestrator import Orchestrator, OrchestratorError
+from engine.orchestrator import Orchestrator, OrchestratorError, RunHandles
 from engine.runner import run_workflows, RunnerError
 from engine.observers.http import HttpObserver
 from engine.observers.postgres import PostgresObserver
-from engine.observers.proxy import ProxyObserver
 from engine.comparator import compare
 
 log = structlog.get_logger(__name__)
@@ -42,6 +40,18 @@ def main() -> int:
         action="store_true",
         help="Show detailed evidence for each finding.",
     )
+    parser.add_argument(
+        "--base-url",
+        help="URL of the already-running base version (skips orchestration).",
+    )
+    parser.add_argument(
+        "--target-url",
+        help="URL of the already-running target version (skips orchestration).",
+    )
+    parser.add_argument(
+        "--pg-dsn",
+        help="Postgres connection string (required with --base-url for DB observation).",
+    )
     args = parser.parse_args()
 
     try:
@@ -52,34 +62,45 @@ def main() -> int:
 
     log.info("manifest_loaded", app=manifest.app.name, workflows=len(manifest.workflows))
 
-    orchestrator = Orchestrator(manifest)
+    use_direct = args.base_url and args.target_url
+    orchestrator = None if use_direct else Orchestrator(manifest)
     try:
         start = time.monotonic()
-        handles = orchestrator.start()
+        if use_direct:
+            handles = RunHandles(
+                base_url=args.base_url.rstrip("/"),
+                target_url=args.target_url.rstrip("/"),
+                postgres_dsn=args.pg_dsn or "",
+            )
+        else:
+            handles = orchestrator.start()
         log.info("environments_ready", base=handles.base_url, target=handles.target_url)
 
         # Snapshot DB before workflows
-        pg_before_base = None
-        pg_before_target = None
-        if manifest.database:
+        pg_observer = None
+        pg_before = None
+        if manifest.database and handles.postgres_dsn:
             pg_observer = PostgresObserver(handles.postgres_dsn)
             tables = manifest.database.observe_tables
-            pg_before_base = pg_observer.snapshot(tables)
-            pg_before_target = pg_observer.snapshot(tables)
+            pg_before = pg_observer.snapshot(tables)
 
         # Run workflows
         workflow_results = run_workflows(manifest.workflows, handles)
         log.info("workflows_complete", count=len(workflow_results))
 
+        # Count total steps
+        total_steps = sum(len(wr.steps) for wr in workflow_results)
+
         # Observe HTTP
-        http_diffs = HttpObserver.observe_and_diff(workflow_results)
+        http_observer = HttpObserver()
+        base_obs, target_obs = http_observer.observe(workflow_results)
+        http_diffs = HttpObserver.diff(base_obs, target_obs)
 
         # Observe Postgres
         pg_diff = None
-        if manifest.database and pg_before_base is not None:
-            pg_after_base = pg_observer.snapshot(tables)
-            pg_after_target = pg_observer.snapshot(tables)
-            pg_diff = PostgresObserver.diff(pg_before_base, pg_after_target)
+        if pg_observer and pg_before is not None:
+            pg_after = pg_observer.snapshot(tables)
+            pg_diff = PostgresObserver.diff(pg_before, pg_after)
 
         # Observe outbound calls
         outbound_diff = None
@@ -93,7 +114,9 @@ def main() -> int:
             postgres_diff=pg_diff,
             outbound_diff=outbound_diff,
             normalize_config=manifest.normalize,
-            metadata={"duration_s": round(duration, 2)},
+            total_workflows=len(workflow_results),
+            total_steps=total_steps,
+            duration_seconds=round(duration, 2),
         )
 
         # Output
@@ -108,7 +131,8 @@ def main() -> int:
         print(f"Error: {exc}", file=sys.stderr)
         return 2
     finally:
-        orchestrator.cleanup()
+        if orchestrator:
+            orchestrator.cleanup()
 
 
 def _print_human(result, *, verbose: bool = False) -> None:
@@ -117,7 +141,7 @@ def _print_human(result, *, verbose: bool = False) -> None:
 
     if not findings:
         print("\n  No behavioral differences found.\n")
-        if noise:
+        if noise and noise.total_suppressed > 0:
             print(f"  ({noise.total_suppressed} differences suppressed by normalization)\n")
         return
 
@@ -135,8 +159,11 @@ def _print_human(result, *, verbose: bool = False) -> None:
             print(f"      target: {f.evidence_target}")
         print()
 
-    if noise:
+    if noise and noise.total_suppressed > 0:
         print(f"  ({noise.total_suppressed} differences suppressed by normalization)\n")
+
+    meta = result.metadata
+    print(f"  Ran {meta.total_workflows} workflow(s), {meta.total_steps} step(s) in {meta.duration_seconds}s\n")
 
 
 if __name__ == "__main__":
