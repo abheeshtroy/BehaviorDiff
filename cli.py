@@ -13,6 +13,12 @@ import structlog
 
 from ai.classifier import ClassificationError, ClassificationResult, classify_findings
 from ai.intent import ChangeIntent, IntentExtractionError, extract_intent
+from ai.scaffold import extract_routes_from_diff, extract_tables_from_diff
+from ai.workflow_gen import (
+    WorkflowGenerationError,
+    WorkflowProposal,
+    generate_workflows,
+)
 from engine.manifest import load_manifest, ManifestError
 from engine.orchestrator import Orchestrator, OrchestratorError, RunHandles
 from engine.runner import run_workflows, RunnerError
@@ -72,7 +78,15 @@ def main() -> int:
         "--pr-description",
         help="PR description for the change, used alongside --diff to extract intent.",
     )
+    parser.add_argument(
+        "--generate-workflows",
+        action="store_true",
+        help="Propose workflows that exercise the change. Requires --diff.",
+    )
     args = parser.parse_args()
+
+    if args.generate_workflows and not args.diff:
+        parser.error("--generate-workflows requires --diff")
 
     try:
         manifest = load_manifest(args.manifest)
@@ -164,10 +178,14 @@ def main() -> int:
         # plain output rather than failing the run.
         intent = None
         classification = None
-        if args.diff:
+        proposal = None
+        diff = _read_diff(args.diff) if args.diff else None
+        if diff is not None:
             intent, classification = _classify(
-                args.diff, args.pr_description, result.findings
+                diff, args.pr_description, result.findings
             )
+            if args.generate_workflows:
+                proposal = _propose_workflows(diff, args.pr_description)
 
         # Output
         if args.json_output:
@@ -176,6 +194,8 @@ def main() -> int:
                 payload["intent"] = intent.model_dump(mode="json")
             if classification is not None:
                 payload["classification"] = classification.model_dump(mode="json")
+            if proposal is not None:
+                payload["proposed_workflows"] = proposal.model_dump(mode="json")
             print(json.dumps(payload, indent=2))
         else:
             _print_human(
@@ -183,6 +203,7 @@ def main() -> int:
                 verbose=args.verbose,
                 intent=intent,
                 classification=classification,
+                proposal=proposal,
             )
 
         return 0 if not result.findings else 1
@@ -195,8 +216,21 @@ def main() -> int:
             orchestrator.cleanup()
 
 
+def _read_diff(diff_path: Path) -> str | None:
+    """Read the diff file, or return None if it can't be read.
+
+    An unreadable diff only costs the advisory AI layer, so it is logged and
+    skipped rather than failing the comparison that already succeeded.
+    """
+    try:
+        return diff_path.read_text()
+    except OSError as exc:
+        log.error("diff_read_failed", path=str(diff_path), error=str(exc))
+        return None
+
+
 def _classify(
-    diff_path: Path,
+    diff: str,
     pr_description: str | None,
     findings: list,
 ) -> tuple[ChangeIntent | None, ClassificationResult | None]:
@@ -214,12 +248,6 @@ def _classify(
         return None, None
 
     try:
-        diff = diff_path.read_text()
-    except OSError as exc:
-        log.error("diff_read_failed", path=str(diff_path), error=str(exc))
-        return None, None
-
-    try:
         intent = extract_intent(diff, pr_description)
     except IntentExtractionError as exc:
         log.error("intent_extraction_failed", error=str(exc))
@@ -232,12 +260,58 @@ def _classify(
         return intent, None
 
 
+def _propose_workflows(
+    diff: str,
+    pr_description: str | None,
+) -> WorkflowProposal | None:
+    """Suggest workflows that exercise the change described by the diff.
+
+    Advisory like the rest of the AI layer: returns None on any failure so a bad
+    reply costs the suggestion, not the run.
+    """
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        log.warning(
+            "workflow_generation_skipped",
+            reason="ANTHROPIC_API_KEY is not set",
+        )
+        return None
+
+    routes = extract_routes_from_diff(diff)
+    tables = extract_tables_from_diff(diff)
+    log.info("scaffold_extracted", routes=len(routes), tables=len(tables))
+
+    try:
+        return generate_workflows(diff, routes, tables, pr_description)
+    except WorkflowGenerationError as exc:
+        log.error("workflow_generation_failed", error=str(exc))
+        return None
+
+
+def _print_proposal(proposal: WorkflowProposal) -> None:
+    if not proposal.workflows:
+        print("\n  No workflows proposed.\n")
+    else:
+        print(f"\n  {len(proposal.workflows)} proposed workflow(s):\n")
+        for workflow in proposal.workflows:
+            print(f"  * {workflow.name}")
+            print(f"      {workflow.rationale}")
+            for step in workflow.steps:
+                method = step.get("method", "?")
+                path = step.get("path", "?")
+                print(f"      {method} {path}")
+            print()
+
+    if proposal.coverage_notes:
+        print(f"  Coverage: {proposal.coverage_notes}\n")
+
+
 def _print_human(
     result,
     *,
     verbose: bool = False,
     intent: ChangeIntent | None = None,
     classification: ClassificationResult | None = None,
+    proposal: WorkflowProposal | None = None,
 ) -> None:
     findings = result.findings
     noise = result.noise_summary
@@ -257,6 +331,8 @@ def _print_human(
         print("\n  No behavioral differences found.\n")
         if noise and noise.total_suppressed > 0:
             print(f"  ({noise.total_suppressed} differences suppressed by normalization)\n")
+        if proposal is not None:
+            _print_proposal(proposal)
         return
 
     print(f"\n  {len(findings)} finding(s):\n")
@@ -282,6 +358,9 @@ def _print_human(
 
     if noise and noise.total_suppressed > 0:
         print(f"  ({noise.total_suppressed} differences suppressed by normalization)\n")
+
+    if proposal is not None:
+        _print_proposal(proposal)
 
     meta = result.metadata
     print(f"  Ran {meta.total_workflows} workflow(s), {meta.total_steps} step(s) in {meta.duration_seconds}s\n")
