@@ -1,10 +1,13 @@
 """Runner: executes workflows against both versions of the app in lockstep.
 
 For each step, variables captured from earlier steps are substituted into
-the path and body, then the identical request is sent to both the base and
-target versions. Captured values always come from the base response — this
-keeps the substituted inputs to later steps identical across both versions,
-so the comparison stays apples-to-apples even if base and target diverge.
+the path and body, then the request is sent to both the base and target
+versions. Each version now has its own database (see orchestrator.py), so a
+value captured from base's response — e.g. a generated cart id — may not
+exist in target's database at all. Variables are therefore captured and
+substituted per-track: base_variables feed the base request, target_variables
+feed the target request, so each version consistently chains off its own
+prior responses.
 """
 
 from __future__ import annotations
@@ -40,12 +43,18 @@ class ResponseCapture(BaseModel):
 
 
 class StepResult(BaseModel):
-    """One step executed against both versions, with both responses."""
+    """One step executed against both versions, with both responses.
+
+    ``path``/``body`` reflect what was sent to base — the canonical request
+    shown for this step — since base and target may substitute different
+    captured values and diverge in exactly the field under test.
+    """
 
     method: str
     path: str
     body: Any = None
     captured: dict[str, Any] = Field(default_factory=dict)
+    captured_target: dict[str, Any] = Field(default_factory=dict)
     base_response: ResponseCapture
     target_response: ResponseCapture
 
@@ -80,10 +89,11 @@ def run_workflows(
 
 def _run_workflow(workflow: Workflow, handles: RunHandles, client: httpx.Client) -> WorkflowResult:
     log.info("running workflow", name=workflow.name)
-    variables: dict[str, Any] = {}
+    base_variables: dict[str, Any] = {}
+    target_variables: dict[str, Any] = {}
     steps: list[StepResult] = []
     for step in workflow.steps:
-        steps.append(_run_step(workflow.name, step, handles, client, variables))
+        steps.append(_run_step(workflow.name, step, handles, client, base_variables, target_variables))
     return WorkflowResult(name=workflow.name, steps=steps)
 
 
@@ -92,27 +102,32 @@ def _run_step(
     step: WorkflowStep,
     handles: RunHandles,
     client: httpx.Client,
-    variables: dict[str, Any],
+    base_variables: dict[str, Any],
+    target_variables: dict[str, Any],
 ) -> StepResult:
-    path = _substitute(step.path, workflow_name, variables)
-    body = _substitute(step.body, workflow_name, variables)
+    base_path = _substitute(step.path, workflow_name, base_variables)
+    base_body = _substitute(step.body, workflow_name, base_variables)
+    target_path = _substitute(step.path, workflow_name, target_variables)
+    target_body = _substitute(step.body, workflow_name, target_variables)
 
-    base_response = _send(client, handles.base_url, step.method, path, body)
-    target_response = _send(client, handles.target_url, step.method, path, body)
+    base_response = _send(client, handles.base_url, step.method, base_path, base_body)
+    target_response = _send(client, handles.target_url, step.method, target_path, target_body)
 
     captured: dict[str, Any] = {}
+    captured_target: dict[str, Any] = {}
     if step.capture:
-        captured = {
-            var_name: _extract_jsonpath(expr, base_response.body, workflow_name, step.path)
-            for var_name, expr in step.capture.items()
-        }
-        variables.update(captured)
+        for var_name, expr in step.capture.items():
+            captured[var_name] = _extract_jsonpath(expr, base_response.body, workflow_name, step.path)
+            captured_target[var_name] = _extract_jsonpath(expr, target_response.body, workflow_name, step.path)
+        base_variables.update(captured)
+        target_variables.update(captured_target)
 
     return StepResult(
         method=step.method,
-        path=path,
-        body=body,
+        path=base_path,
+        body=base_body,
         captured=captured,
+        captured_target=captured_target,
         base_response=base_response,
         target_response=target_response,
     )

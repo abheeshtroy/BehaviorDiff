@@ -55,6 +55,7 @@ class PostgresDiff(BaseModel):
     """What changed across all observed tables between two snapshots."""
 
     tables: dict[str, TableDiff]
+    primary_keys: dict[str, list[str]] = Field(default_factory=dict)
 
 
 class PostgresObserver:
@@ -103,6 +104,7 @@ class PostgresObserver:
             )
 
         tables: dict[str, TableDiff] = {}
+        primary_keys: dict[str, list[str]] = {}
         for table in sorted(before_tables):
             pk_columns = before.primary_keys.get(table)
             if pk_columns != after.primary_keys.get(table):
@@ -113,11 +115,133 @@ class PostgresObserver:
             if not pk_columns:
                 raise PostgresObserverError(f"table {table!r}: snapshot has no primary key columns recorded")
 
+            primary_keys[table] = pk_columns
             tables[table] = PostgresObserver._diff_table(
                 table, pk_columns, before.tables[table], after.tables[table]
             )
 
-        return PostgresDiff(tables=tables)
+        return PostgresDiff(tables=tables, primary_keys=primary_keys)
+
+    @staticmethod
+    def compare_deltas(base_delta: PostgresDiff, target_delta: PostgresDiff) -> PostgresDiff:
+        """Compare what changed in base's own database against what changed in target's own database.
+
+        With separate databases per version, comparing final states directly
+        is meaningless — the rows live in different databases entirely. What
+        we can compare is each version's *delta*: what it inserted, deleted,
+        and modified relative to its own identical starting seed. A row both
+        versions inserted/modified/deleted identically cancels out; only
+        genuine behavioral divergence between the two deltas remains.
+
+        Per table, inserts and deletes are compared by primary key:
+          - present in only one side's insert set -> an added/removed finding
+          - inserted by both with different values -> a modified finding
+        Deletes mirror this with the polarity flipped, since "only base
+        deleted this row" means the row still exists in target's database.
+        Modifies are compared similarly: rows both sides modified are
+        compared by their resulting (after) values; a row only one side
+        modified is reported directly, since the other side's current value
+        is whatever it started as.
+        """
+        table_names = sorted(set(base_delta.tables) | set(target_delta.tables))
+        result_tables: dict[str, TableDiff] = {}
+        primary_keys: dict[str, list[str]] = {}
+
+        for table in table_names:
+            base_pk = base_delta.primary_keys.get(table)
+            target_pk = target_delta.primary_keys.get(table)
+            pk_columns = base_pk or target_pk
+            if base_pk is not None and target_pk is not None and base_pk != target_pk:
+                raise PostgresObserverError(
+                    f"table {table!r}: primary key columns differ between deltas "
+                    f"(base={base_pk}, target={target_pk})"
+                )
+            if not pk_columns:
+                raise PostgresObserverError(f"table {table!r}: no primary key columns available to compare deltas")
+
+            primary_keys[table] = pk_columns
+            result_tables[table] = PostgresObserver._compare_table_deltas(
+                table,
+                pk_columns,
+                base_delta.tables.get(table, TableDiff()),
+                target_delta.tables.get(table, TableDiff()),
+            )
+
+        return PostgresDiff(tables=result_tables, primary_keys=primary_keys)
+
+    @staticmethod
+    def _compare_table_deltas(
+        table: str, pk_columns: list[str], base_diff: TableDiff, target_diff: TableDiff
+    ) -> TableDiff:
+        inserted: list[dict[str, Any]] = []
+        deleted: list[dict[str, Any]] = []
+        modified: list[RowChange] = []
+
+        # -- inserts: only base -> deleted finding, only target -> inserted finding,
+        # both with different values -> modified finding.
+        base_inserted = {PostgresObserver._pk_tuple(pk_columns, table, row): row for row in base_diff.inserted}
+        target_inserted = {PostgresObserver._pk_tuple(pk_columns, table, row): row for row in target_diff.inserted}
+
+        for pk in base_inserted.keys() - target_inserted.keys():
+            deleted.append(base_inserted[pk])
+        for pk in target_inserted.keys() - base_inserted.keys():
+            inserted.append(target_inserted[pk])
+        for pk in base_inserted.keys() & target_inserted.keys():
+            base_row, target_row = base_inserted[pk], target_inserted[pk]
+            if base_row != target_row:
+                modified.append(
+                    RowChange(primary_key=dict(zip(pk_columns, pk, strict=True)), before=base_row, after=target_row)
+                )
+
+        # -- deletes: mirrored polarity, since "only base deleted this row" means
+        # target's database still has it.
+        base_deleted = {PostgresObserver._pk_tuple(pk_columns, table, row): row for row in base_diff.deleted}
+        target_deleted = {PostgresObserver._pk_tuple(pk_columns, table, row): row for row in target_diff.deleted}
+
+        for pk in base_deleted.keys() - target_deleted.keys():
+            inserted.append(base_deleted[pk])
+        for pk in target_deleted.keys() - base_deleted.keys():
+            deleted.append(target_deleted[pk])
+        for pk in base_deleted.keys() & target_deleted.keys():
+            base_row, target_row = base_deleted[pk], target_deleted[pk]
+            if base_row != target_row:
+                modified.append(
+                    RowChange(primary_key=dict(zip(pk_columns, pk, strict=True)), before=base_row, after=target_row)
+                )
+
+        # -- modifies: both -> compare resulting (after) values, only one side ->
+        # report directly (the other side's current value is whatever it started as).
+        base_modified = {
+            tuple(change.primary_key[col] for col in pk_columns): change for change in base_diff.modified
+        }
+        target_modified = {
+            tuple(change.primary_key[col] for col in pk_columns): change for change in target_diff.modified
+        }
+
+        for pk in base_modified.keys() - target_modified.keys():
+            change = base_modified[pk]
+            modified.append(RowChange(primary_key=change.primary_key, before=change.after, after=change.before))
+        for pk in target_modified.keys() - base_modified.keys():
+            change = target_modified[pk]
+            modified.append(RowChange(primary_key=change.primary_key, before=change.before, after=change.after))
+        for pk in base_modified.keys() & target_modified.keys():
+            base_change, target_change = base_modified[pk], target_modified[pk]
+            if base_change.after != target_change.after:
+                modified.append(
+                    RowChange(primary_key=base_change.primary_key, before=base_change.after, after=target_change.after)
+                )
+
+        def row_sort_key(row: dict[str, Any]) -> tuple[str, ...]:
+            return _pk_sort_key(PostgresObserver._pk_tuple(pk_columns, table, row))
+
+        def change_sort_key(change: RowChange) -> tuple[str, ...]:
+            return _pk_sort_key(tuple(change.primary_key[col] for col in pk_columns))
+
+        return TableDiff(
+            inserted=sorted(inserted, key=row_sort_key),
+            deleted=sorted(deleted, key=row_sort_key),
+            modified=sorted(modified, key=change_sort_key),
+        )
 
     @staticmethod
     def _diff_table(

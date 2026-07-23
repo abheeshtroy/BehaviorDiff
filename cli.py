@@ -83,16 +83,26 @@ def main() -> int:
             handles = orchestrator.start()
         log.info("environments_ready", base=handles.base_url, target=handles.target_url)
 
-        # Each version has its own database, so the postgres comparison is
-        # base-state vs target-state after the workflows run. Both were seeded
-        # identically, so rows the versions agree on cancel out and only real
-        # behavioral differences remain.
+        # Each version has its own database, so there's no single "base-state vs
+        # target-state" snapshot to diff directly — the rows live in separate
+        # databases entirely. Instead we snapshot each database before and after
+        # the workflows run, diff each version against its own seed to get that
+        # version's delta, then compare the two deltas. Since both databases were
+        # seeded identically, a change both versions made in the same way cancels
+        # out and only real behavioral differences remain.
         observe_db = bool(manifest.database and handles.base_postgres_dsn and handles.target_postgres_dsn)
         if manifest.database and not observe_db:
             log.warning(
                 "postgres_observation_skipped",
                 reason="a dsn is missing for one or both versions",
             )
+
+        base_pg_before = target_pg_before = None
+        if observe_db:
+            assert manifest.database is not None
+            tables = manifest.database.observe_tables
+            base_pg_before = PostgresObserver(handles.base_postgres_dsn).snapshot(tables)
+            target_pg_before = PostgresObserver(handles.target_postgres_dsn).snapshot(tables)
 
         # Run workflows
         workflow_results = run_workflows(manifest.workflows, handles)
@@ -110,10 +120,13 @@ def main() -> int:
         pg_diff = None
         if observe_db:
             assert manifest.database is not None
+            assert base_pg_before is not None and target_pg_before is not None
             tables = manifest.database.observe_tables
-            base_snapshot = PostgresObserver(handles.base_postgres_dsn).snapshot(tables)
-            target_snapshot = PostgresObserver(handles.target_postgres_dsn).snapshot(tables)
-            pg_diff = PostgresObserver.diff(base_snapshot, target_snapshot)
+            base_pg_after = PostgresObserver(handles.base_postgres_dsn).snapshot(tables)
+            target_pg_after = PostgresObserver(handles.target_postgres_dsn).snapshot(tables)
+            base_delta = PostgresObserver.diff(base_pg_before, base_pg_after)
+            target_delta = PostgresObserver.diff(target_pg_before, target_pg_after)
+            pg_diff = PostgresObserver.compare_deltas(base_delta, target_delta)
 
         # Observe outbound calls
         outbound_diff = None

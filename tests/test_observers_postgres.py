@@ -13,6 +13,7 @@ import pytest
 
 from engine.observers import postgres as pg_module
 from engine.observers.postgres import (
+    PostgresDiff,
     PostgresObserver,
     PostgresObserverError,
     PostgresSnapshot,
@@ -21,6 +22,13 @@ from engine.observers.postgres import (
 
 def _snapshot(tables: dict[str, list[dict]], primary_keys: dict[str, list[str]]) -> PostgresSnapshot:
     return PostgresSnapshot(tables=tables, primary_keys=primary_keys)
+
+
+def _delta(table: str, pk_columns: list[str], before_rows: list[dict], after_rows: list[dict]) -> PostgresDiff:
+    """Build a one-version delta the way the CLI does: diff a table's own before/after snapshot."""
+    before = _snapshot({table: before_rows}, {table: pk_columns})
+    after = _snapshot({table: after_rows}, {table: pk_columns})
+    return PostgresObserver.diff(before, after)
 
 
 # -- diff(): inserted / deleted / modified -----------------------------------
@@ -143,6 +151,141 @@ def test_diff_raises_when_row_missing_primary_key_column() -> None:
 
     with pytest.raises(PostgresObserverError, match="orders"):
         PostgresObserver.diff(before, after)
+
+
+# -- compare_deltas(): delta-of-deltas across two separate databases ----------
+
+
+def test_compare_deltas_identical_deltas_produce_no_findings() -> None:
+    base_delta = _delta(
+        "orders",
+        ["id"],
+        [{"id": 1, "status": "pending"}],
+        [{"id": 1, "status": "shipped"}, {"id": 2, "status": "pending"}],
+    )
+    target_delta = _delta(
+        "orders",
+        ["id"],
+        [{"id": 1, "status": "pending"}],
+        [{"id": 1, "status": "shipped"}, {"id": 2, "status": "pending"}],
+    )
+
+    result = PostgresObserver.compare_deltas(base_delta, target_delta)
+
+    assert result.tables["orders"].inserted == []
+    assert result.tables["orders"].deleted == []
+    assert result.tables["orders"].modified == []
+
+
+def test_compare_deltas_insert_asymmetry_only_base_is_deleted_finding() -> None:
+    base_delta = _delta("orders", ["id"], [], [{"id": 1, "status": "pending"}])
+    target_delta = _delta("orders", ["id"], [], [])
+
+    result = PostgresObserver.compare_deltas(base_delta, target_delta)
+
+    assert result.tables["orders"].deleted == [{"id": 1, "status": "pending"}]
+    assert result.tables["orders"].inserted == []
+    assert result.tables["orders"].modified == []
+
+
+def test_compare_deltas_insert_asymmetry_only_target_is_inserted_finding() -> None:
+    base_delta = _delta("orders", ["id"], [], [])
+    target_delta = _delta("orders", ["id"], [], [{"id": 1, "status": "pending"}])
+
+    result = PostgresObserver.compare_deltas(base_delta, target_delta)
+
+    assert result.tables["orders"].inserted == [{"id": 1, "status": "pending"}]
+    assert result.tables["orders"].deleted == []
+    assert result.tables["orders"].modified == []
+
+
+def test_compare_deltas_both_insert_same_pk_different_values_is_modified() -> None:
+    base_delta = _delta("orders", ["id"], [], [{"id": 1, "status": "pending"}])
+    target_delta = _delta("orders", ["id"], [], [{"id": 1, "status": "cancelled"}])
+
+    result = PostgresObserver.compare_deltas(base_delta, target_delta)
+
+    [modified] = result.tables["orders"].modified
+    assert modified.primary_key == {"id": 1}
+    assert modified.before == {"id": 1, "status": "pending"}
+    assert modified.after == {"id": 1, "status": "cancelled"}
+    assert result.tables["orders"].inserted == []
+    assert result.tables["orders"].deleted == []
+
+
+def test_compare_deltas_delete_asymmetry_only_base_is_inserted_finding() -> None:
+    """Delete polarity is mirrored: only base deleting a row means it still exists in target's database."""
+    base_delta = _delta("orders", ["id"], [{"id": 1, "status": "pending"}], [])
+    target_delta = _delta("orders", ["id"], [{"id": 1, "status": "pending"}], [{"id": 1, "status": "pending"}])
+
+    result = PostgresObserver.compare_deltas(base_delta, target_delta)
+
+    assert result.tables["orders"].inserted == [{"id": 1, "status": "pending"}]
+    assert result.tables["orders"].deleted == []
+    assert result.tables["orders"].modified == []
+
+
+def test_compare_deltas_delete_asymmetry_only_target_is_deleted_finding() -> None:
+    base_delta = _delta("orders", ["id"], [{"id": 1, "status": "pending"}], [{"id": 1, "status": "pending"}])
+    target_delta = _delta("orders", ["id"], [{"id": 1, "status": "pending"}], [])
+
+    result = PostgresObserver.compare_deltas(base_delta, target_delta)
+
+    assert result.tables["orders"].deleted == [{"id": 1, "status": "pending"}]
+    assert result.tables["orders"].inserted == []
+    assert result.tables["orders"].modified == []
+
+
+def test_compare_deltas_modify_only_one_side_is_modified_finding() -> None:
+    base_delta = _delta("orders", ["id"], [{"id": 1, "status": "pending"}], [{"id": 1, "status": "shipped"}])
+    target_delta = _delta("orders", ["id"], [{"id": 1, "status": "pending"}], [{"id": 1, "status": "pending"}])
+
+    result = PostgresObserver.compare_deltas(base_delta, target_delta)
+
+    [modified] = result.tables["orders"].modified
+    assert modified.primary_key == {"id": 1}
+    assert modified.before == {"id": 1, "status": "shipped"}
+    assert modified.after == {"id": 1, "status": "pending"}
+
+
+def test_compare_deltas_modify_both_sides_compares_after_values() -> None:
+    base_delta = _delta("orders", ["id"], [{"id": 1, "status": "pending"}], [{"id": 1, "status": "shipped"}])
+    target_delta = _delta("orders", ["id"], [{"id": 1, "status": "pending"}], [{"id": 1, "status": "cancelled"}])
+
+    result = PostgresObserver.compare_deltas(base_delta, target_delta)
+
+    [modified] = result.tables["orders"].modified
+    assert modified.primary_key == {"id": 1}
+    assert modified.before == {"id": 1, "status": "shipped"}
+    assert modified.after == {"id": 1, "status": "cancelled"}
+
+
+def test_compare_deltas_mixed_scenario_across_multiple_categories() -> None:
+    """Insert-only-target, delete-only-base, and an identical modify all land in one table diff."""
+    base_delta = _delta(
+        "orders",
+        ["id"],
+        [{"id": 1, "status": "pending"}, {"id": 2, "status": "pending"}],
+        [{"id": 2, "status": "shipped"}],
+    )
+    target_delta = _delta(
+        "orders",
+        ["id"],
+        [{"id": 1, "status": "pending"}, {"id": 2, "status": "pending"}],
+        [{"id": 1, "status": "pending"}, {"id": 2, "status": "shipped"}, {"id": 3, "status": "pending"}],
+    )
+
+    result = PostgresObserver.compare_deltas(base_delta, target_delta)
+    table = result.tables["orders"]
+
+    # base deleted id=1, target kept it -> still exists on target's side -> "inserted"
+    assert {"id": 1, "status": "pending"} in table.inserted
+    # target inserted id=3, base never did -> genuinely new
+    assert {"id": 3, "status": "pending"} in table.inserted
+    assert len(table.inserted) == 2
+    # both modified id=2 identically (pending -> shipped) -> cancels out
+    assert table.deleted == []
+    assert table.modified == []
 
 
 # -- snapshot(): mocked psycopg connection -------------------------------------

@@ -153,6 +153,7 @@ def test_capture_extracts_nested_field() -> None:
     [result] = run_workflows([workflow], _handles(), client=client)
 
     assert result.steps[0].captured == {"city": "SF"}
+    assert result.steps[0].captured_target == {"city": "SF"}
 
 
 def test_capture_missing_field_raises_runner_error() -> None:
@@ -218,8 +219,44 @@ def test_multi_step_workflow_step_two_uses_capture_from_step_one() -> None:
     assert result.name == "checkout"
     assert len(result.steps) == 3
     assert result.steps[0].captured == {"cart_id": "cart_1"}
+    assert result.steps[0].captured_target == {"cart_id": "cart_1"}
     assert result.steps[1].path == "/api/carts/cart_1/discount"
     assert result.steps[2].body == {"cart_id": "cart_1", "address": {"city": "SF"}}
+
+
+def test_dual_track_capture_uses_correct_id_per_version() -> None:
+    """With separate databases, base and target may generate different ids for
+    the same logical resource. Each version must chain off its own captured
+    value rather than reusing whatever base captured."""
+    workflow = Workflow(
+        name="wf",
+        steps=[
+            WorkflowStep(method="POST", path="/api/carts", body=None, capture={"cart_id": "$.cart_id"}),
+            WorkflowStep(
+                method="POST",
+                path="/api/carts/{cart_id}/discount",
+                body={"code": "SAVE10"},
+            ),
+        ],
+    )
+    client = _mock_client(
+        [
+            _response(json_body={"cart_id": "base_1"}),  # step1 base
+            _response(json_body={"cart_id": "target_1"}),  # step1 target
+            _response(json_body={"discounted": True}),  # step2 base
+            _response(json_body={"discounted": True}),  # step2 target
+        ]
+    )
+
+    [result] = run_workflows([workflow], _handles(), client=client)
+
+    assert result.steps[0].captured == {"cart_id": "base_1"}
+    assert result.steps[0].captured_target == {"cart_id": "target_1"}
+    assert result.steps[1].path == "/api/carts/base_1/discount"
+
+    calls = client.request.call_args_list
+    assert calls[2].args == ("POST", "http://base.local/api/carts/base_1/discount")
+    assert calls[3].args == ("POST", "http://target.local/api/carts/target_1/discount")
 
 
 def test_identical_request_sent_to_base_and_target() -> None:
