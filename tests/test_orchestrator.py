@@ -87,10 +87,11 @@ class TestHappyPath:
         (tmp_path / "seed.sql").write_text("insert into orders default values;")
         manifest = _manifest(with_database=True)
 
-        postgres_container = _make_container("pg", 5432, 55432)
+        base_pg = _make_container("pg-base", 5432, 55432)
+        target_pg = _make_container("pg-target", 5432, 55433)
         base_container = _make_container("base", 8000, 18000)
         target_container = _make_container("target", 8000, 18001)
-        client = _make_client([postgres_container, base_container, target_container])
+        client = _make_client([base_pg, target_pg, base_container, target_container])
 
         orch = Orchestrator(manifest, docker_client=client)
 
@@ -104,12 +105,81 @@ class TestHappyPath:
         assert isinstance(handles, RunHandles)
         assert handles.base_url == "http://localhost:18000"
         assert handles.target_url == "http://localhost:18001"
-        assert handles.postgres_dsn is not None
-        assert "55432" in handles.postgres_dsn
+
+        # Each version gets its own database, on its own host port.
+        assert handles.base_postgres_dsn is not None
+        assert handles.target_postgres_dsn is not None
+        assert "55432" in handles.base_postgres_dsn
+        assert "55433" in handles.target_postgres_dsn
+        assert handles.base_postgres_dsn != handles.target_postgres_dsn
 
         assert client.networks.create.call_count == 1
-        assert client.containers.run.call_count == 3
+        assert client.containers.run.call_count == 4
         assert client.images.build.call_count == 2
+
+    def test_each_postgres_container_is_named_for_its_version(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "seed.sql").write_text("insert into orders default values;")
+        manifest = _manifest(with_database=True)
+
+        client = _make_client(
+            [
+                _make_container("pg-base", 5432, 55432),
+                _make_container("pg-target", 5432, 55433),
+                _make_container("base", 8000, 18000),
+                _make_container("target", 8000, 18001),
+            ]
+        )
+
+        orch = Orchestrator(manifest, docker_client=client)
+
+        monkeypatch.setattr(orch_module.subprocess, "run", MagicMock(return_value=MagicMock(returncode=0)))
+        _mock_psycopg_ok(monkeypatch)
+        monkeypatch.setattr(orch_module.httpx, "get", MagicMock(return_value=MagicMock(status_code=200)))
+        _quiet_waits(monkeypatch)
+
+        orch.start()
+
+        names = [call.kwargs["name"] for call in client.containers.run.call_args_list]
+        assert names[0] == f"behaviordiff-{orch.run_id}-postgres-base"
+        assert names[1] == f"behaviordiff-{orch.run_id}-postgres-target"
+
+    def test_each_app_is_wired_to_its_own_postgres(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "seed.sql").write_text("insert into orders default values;")
+        manifest = _manifest(with_database=True)
+
+        client = _make_client(
+            [
+                _make_container("pg-base", 5432, 55432),
+                _make_container("pg-target", 5432, 55433),
+                _make_container("base", 8000, 18000),
+                _make_container("target", 8000, 18001),
+            ]
+        )
+
+        orch = Orchestrator(manifest, docker_client=client)
+
+        monkeypatch.setattr(orch_module.subprocess, "run", MagicMock(return_value=MagicMock(returncode=0)))
+        _mock_psycopg_ok(monkeypatch)
+        monkeypatch.setattr(orch_module.httpx, "get", MagicMock(return_value=MagicMock(status_code=200)))
+        _quiet_waits(monkeypatch)
+
+        orch.start()
+
+        # containers.run calls 2 and 3 are the app containers, in base/target order.
+        base_env = client.containers.run.call_args_list[2].kwargs["environment"]
+        target_env = client.containers.run.call_args_list[3].kwargs["environment"]
+
+        assert base_env["PGHOST"] == "pg-base"
+        assert target_env["PGHOST"] == "pg-target"
+        assert "pg-base" in base_env["DATABASE_URL"]
+        assert "pg-target" in target_env["DATABASE_URL"]
+        assert base_env["DATABASE_URL"] != target_env["DATABASE_URL"]
 
     def test_start_without_database_skips_postgres(self, monkeypatch: pytest.MonkeyPatch) -> None:
         manifest = _manifest(with_database=False)
@@ -128,7 +198,8 @@ class TestHappyPath:
 
         handles = orch.start()
 
-        assert handles.postgres_dsn is None
+        assert handles.base_postgres_dsn is None
+        assert handles.target_postgres_dsn is None
         connect_mock.assert_not_called()
         assert client.containers.run.call_count == 2
 
@@ -161,10 +232,11 @@ class TestFailureModes:
         with pytest.raises(OrchestratorError, match="docker build failed"):
             orch.start()
 
-    def test_postgres_never_ready_raises_and_cleans_up(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_postgres_never_ready_raises_and_cleans_up_both(self, monkeypatch: pytest.MonkeyPatch) -> None:
         manifest = _manifest(with_database=True)
-        postgres_container = _make_container("pg", 5432, 55432)
-        client = _make_client([postgres_container])
+        base_pg = _make_container("pg-base", 5432, 55432)
+        target_pg = _make_container("pg-target", 5432, 55433)
+        client = _make_client([base_pg, target_pg])
 
         orch = Orchestrator(manifest, docker_client=client)
         monkeypatch.setattr(orch_module.subprocess, "run", MagicMock(return_value=MagicMock(returncode=0)))
@@ -173,10 +245,13 @@ class TestFailureModes:
         )
         _quiet_waits(monkeypatch)
 
-        with pytest.raises(OrchestratorError, match="postgres did not become ready"):
+        with pytest.raises(OrchestratorError, match="base postgres did not become ready"):
             orch.start()
 
-        postgres_container.remove.assert_called_once_with(force=True)
+        # Both databases are started before either is waited on, so both
+        # must be torn down even though only the first one was checked.
+        base_pg.remove.assert_called_once_with(force=True)
+        target_pg.remove.assert_called_once_with(force=True)
         client.networks.create.return_value.remove.assert_called_once()
 
     def test_healthcheck_timeout_raises_and_cleans_up(self, monkeypatch: pytest.MonkeyPatch) -> None:

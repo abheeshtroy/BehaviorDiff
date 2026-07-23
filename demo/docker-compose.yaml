@@ -1,5 +1,9 @@
+# Each version gets its own postgres, seeded identically from the same
+# seed.sql. Sharing one database would let base and target overwrite each
+# other's rows, so a difference in the final state could not be attributed
+# to either version.
 services:
-  postgres:
+  postgres-base:
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: postgres
@@ -15,28 +19,44 @@ services:
       timeout: 3s
       retries: 10
 
+  postgres-target:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: shop
+    ports:
+      - "55433:5432"
+    volumes:
+      - ./shop-api/seed.sql:/docker-entrypoint-initdb.d/seed.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 10
+
   base:
     build: ./shop-api
     environment:
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/shop
+      DATABASE_URL: postgresql://postgres:postgres@postgres-base:5432/shop
       PAYMENT_URL: http://payment-mock:9090
       VARIANT: main
     ports:
       - "8001:8000"
     depends_on:
-      postgres:
+      postgres-base:
         condition: service_healthy
 
   target:
     build: ./shop-api
     environment:
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/shop
+      DATABASE_URL: postgresql://postgres:postgres@postgres-target:5432/shop
       PAYMENT_URL: http://payment-mock:9090
       VARIANT: fix/checkout-validation
     ports:
       - "8002:8000"
     depends_on:
-      postgres:
+      postgres-target:
         condition: service_healthy
 
   payment-mock:

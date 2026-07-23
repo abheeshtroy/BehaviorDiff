@@ -13,7 +13,12 @@ from engine.runner import RunnerError, run_workflows
 
 
 def _handles() -> RunHandles:
-    return RunHandles(base_url="http://base.local", target_url="http://target.local", postgres_dsn=None)
+    return RunHandles(
+        base_url="http://base.local",
+        target_url="http://target.local",
+        base_postgres_dsn=None,
+        target_postgres_dsn=None,
+    )
 
 
 def _response(status_code: int = 200, json_body: Any = None, headers: dict[str, str] | None = None) -> MagicMock:

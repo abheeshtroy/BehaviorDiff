@@ -1,11 +1,18 @@
 """Orchestrator: manages the Docker lifecycle for a comparison run.
 
 Given a parsed Manifest, this stands up an isolated environment: a Docker
-network, a shared Postgres instance seeded from the manifest, and two app
-containers built from the base_ref and target_ref checkouts. It waits for
-both apps to report healthy and hands back the connection details the
-runner needs. Every resource it creates is tracked so cleanup() can tear it
-all back down, even if setup fails partway through.
+network, one Postgres instance per version seeded identically from the
+manifest, and two app containers built from the base_ref and target_ref
+checkouts. It waits for both apps to report healthy and hands back the
+connection details the runner needs. Every resource it creates is tracked
+so cleanup() can tear it all back down, even if setup fails partway
+through.
+
+Each version gets its own database. Sharing one would let the two versions
+write over each other's rows, so a difference in the final state could not
+be attributed to either version. Separate databases also mean both sides
+start from the same sequence values, so corresponding rows get the same
+generated ids and can be matched by primary key when diffing.
 """
 
 from __future__ import annotations
@@ -55,7 +62,8 @@ class RunHandles:
 
     base_url: str
     target_url: str
-    postgres_dsn: str | None
+    base_postgres_dsn: str | None
+    target_postgres_dsn: str | None
 
 
 class Orchestrator:
@@ -67,8 +75,10 @@ class Orchestrator:
         self.run_id = uuid.uuid4().hex[:8]
 
         self._network: Network | None = None
-        self._postgres_container: Container | None = None
-        self._postgres_host_port: int | None = None
+        self._base_postgres_container: Container | None = None
+        self._base_postgres_host_port: int | None = None
+        self._target_postgres_container: Container | None = None
+        self._target_postgres_host_port: int | None = None
         self._containers: list[Container] = []
         self._images: list[str] = []
         self._workdirs: list[Path] = []
@@ -83,10 +93,26 @@ class Orchestrator:
         try:
             self._create_network()
 
+            base_postgres_dsn: str | None = None
+            target_postgres_dsn: str | None = None
+
             if self.manifest.database is not None:
-                self._start_postgres()
-                self._wait_for_postgres()
-                self._seed_postgres()
+                # Start both before waiting on either, so the two boots overlap.
+                (
+                    self._base_postgres_container,
+                    self._base_postgres_host_port,
+                ) = self._start_postgres("base")
+                (
+                    self._target_postgres_container,
+                    self._target_postgres_host_port,
+                ) = self._start_postgres("target")
+
+                for label in ("base", "target"):
+                    self._wait_for_postgres(label)
+                    self._seed_postgres(label)
+
+                base_postgres_dsn = self._postgres_dsn(host="localhost", port=self._base_postgres_host_port)
+                target_postgres_dsn = self._postgres_dsn(host="localhost", port=self._target_postgres_host_port)
 
             base_container, base_port = self._start_app("base", self.manifest.compare.base_ref)
             target_container, target_port = self._start_app("target", self.manifest.compare.target_ref)
@@ -97,14 +123,13 @@ class Orchestrator:
             self._wait_for_health("base", base_container, base_url)
             self._wait_for_health("target", target_container, target_url)
 
-            postgres_dsn = (
-                self._postgres_dsn(host="localhost", port=self._postgres_host_port)
-                if self.manifest.database is not None
-                else None
-            )
-
             log.info("run ready", run_id=self.run_id, base_url=base_url, target_url=target_url)
-            return RunHandles(base_url=base_url, target_url=target_url, postgres_dsn=postgres_dsn)
+            return RunHandles(
+                base_url=base_url,
+                target_url=target_url,
+                base_postgres_dsn=base_postgres_dsn,
+                target_postgres_dsn=target_postgres_dsn,
+            )
         except Exception:
             log.error("run setup failed, cleaning up", run_id=self.run_id)
             self.cleanup()
@@ -119,7 +144,10 @@ class Orchestrator:
         for container in reversed(self._containers):
             self._safe_remove_container(container)
         self._containers.clear()
-        self._postgres_container = None
+        self._base_postgres_container = None
+        self._base_postgres_host_port = None
+        self._target_postgres_container = None
+        self._target_postgres_host_port = None
 
         for tag in reversed(self._images):
             self._safe_remove_image(tag)
@@ -145,10 +173,15 @@ class Orchestrator:
 
     # -- postgres ------------------------------------------------------------
 
-    def _start_postgres(self) -> None:
+    def _start_postgres(self, label: str) -> tuple[Container, int]:
+        """Start the Postgres instance dedicated to one version.
+
+        Returns the container and its published host port; the caller owns
+        storing them under the right label.
+        """
         assert self._network is not None
-        name = f"behaviordiff-{self.run_id}-postgres"
-        log.info("starting postgres", name=name)
+        name = f"behaviordiff-{self.run_id}-postgres-{label}"
+        log.info("starting postgres", label=label, name=name)
         try:
             container = self.client.containers.run(
                 _POSTGRES_IMAGE,
@@ -164,15 +197,24 @@ class Orchestrator:
                 labels=self._labels(),
             )
         except (APIError, ImageNotFound, DockerException) as exc:
-            raise OrchestratorError(f"failed to start postgres container: {exc}") from exc
+            raise OrchestratorError(f"failed to start {label} postgres container: {exc}") from exc
 
-        self._postgres_container = container
+        # Track for cleanup before anything else can fail.
         self._containers.append(container)
-        self._postgres_host_port = self._published_port(container, _POSTGRES_PORT)
+        return container, self._published_port(container, _POSTGRES_PORT)
 
-    def _wait_for_postgres(self) -> None:
-        assert self._postgres_host_port is not None
-        dsn = self._postgres_dsn(host="localhost", port=self._postgres_host_port)
+    def _postgres_handles(self, label: str) -> tuple[Container | None, int | None]:
+        """Look up the container and host port belonging to one version."""
+        if label == "base":
+            return self._base_postgres_container, self._base_postgres_host_port
+        if label == "target":
+            return self._target_postgres_container, self._target_postgres_host_port
+        raise OrchestratorError(f"unknown version label {label!r}: expected 'base' or 'target'")
+
+    def _wait_for_postgres(self, label: str) -> None:
+        container, host_port = self._postgres_handles(label)
+        assert host_port is not None
+        dsn = self._postgres_dsn(host="localhost", port=host_port)
         deadline = time.monotonic() + _POSTGRES_READY_TIMEOUT_S
         last_error: Exception | None = None
         while time.monotonic() < deadline:
@@ -184,26 +226,27 @@ class Orchestrator:
                 last_error = exc
                 time.sleep(_POSTGRES_READY_INTERVAL_S)
 
-        logs = self._tail_logs(self._postgres_container) if self._postgres_container else ""
+        logs = self._tail_logs(container)
         raise OrchestratorError(
-            f"postgres did not become ready within {_POSTGRES_READY_TIMEOUT_S}s "
+            f"{label} postgres did not become ready within {_POSTGRES_READY_TIMEOUT_S}s "
             f"(last error: {last_error}).\ncontainer logs:\n{logs}"
         )
 
-    def _seed_postgres(self) -> None:
+    def _seed_postgres(self, label: str) -> None:
         assert self.manifest.database is not None
         seed_path = Path(self.manifest.database.seed)
         if not seed_path.is_file():
             raise OrchestratorError(f"seed file not found: {seed_path}")
 
+        _container, host_port = self._postgres_handles(label)
         sql = seed_path.read_text()
-        dsn = self._postgres_dsn(host="localhost", port=self._postgres_host_port)
-        log.info("seeding postgres", seed=str(seed_path))
+        dsn = self._postgres_dsn(host="localhost", port=host_port)
+        log.info("seeding postgres", label=label, seed=str(seed_path))
         try:
             with psycopg.connect(dsn, autocommit=True) as conn:
                 conn.execute(sql)
         except psycopg.Error as exc:
-            raise OrchestratorError(f"failed to run seed SQL {seed_path}: {exc}") from exc
+            raise OrchestratorError(f"failed to run seed SQL {seed_path} for {label}: {exc}") from exc
 
     def _postgres_dsn(self, host: str, port: int | None) -> str:
         p = port if port is not None else _POSTGRES_PORT
@@ -231,7 +274,7 @@ class Orchestrator:
                 command=self.manifest.app.start,
                 detach=True,
                 network=self._network.name,
-                environment=self._app_environment(),
+                environment=self._app_environment(label),
                 ports={f"{self.manifest.app.port}/tcp": None},
                 labels=self._labels(),
             )
@@ -242,10 +285,15 @@ class Orchestrator:
         host_port = self._published_port(container, self.manifest.app.port)
         return container, host_port
 
-    def _app_environment(self) -> dict[str, str]:
-        if self.manifest.database is None or self._postgres_container is None:
+    def _app_environment(self, label: str) -> dict[str, str]:
+        """Point one version's app at the Postgres instance reserved for it."""
+        if self.manifest.database is None:
             return {}
-        host = self._postgres_container.name
+        container, _host_port = self._postgres_handles(label)
+        if container is None:
+            return {}
+        # Apps reach postgres over the run's docker network, by container name.
+        host = container.name
         dsn = self._postgres_dsn(host=host, port=_POSTGRES_PORT)
         return {
             "DATABASE_URL": dsn,

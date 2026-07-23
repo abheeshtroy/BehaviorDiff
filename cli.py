@@ -49,8 +49,14 @@ def main() -> int:
         help="URL of the already-running target version (skips orchestration).",
     )
     parser.add_argument(
-        "--pg-dsn",
-        help="Postgres connection string (required with --base-url for DB observation).",
+        "--base-pg-dsn",
+        help="Postgres connection string for the base version "
+             "(required with --base-url for DB observation).",
+    )
+    parser.add_argument(
+        "--target-pg-dsn",
+        help="Postgres connection string for the target version "
+             "(required with --target-url for DB observation).",
     )
     args = parser.parse_args()
 
@@ -70,19 +76,23 @@ def main() -> int:
             handles = RunHandles(
                 base_url=args.base_url.rstrip("/"),
                 target_url=args.target_url.rstrip("/"),
-                postgres_dsn=args.pg_dsn or "",
+                base_postgres_dsn=args.base_pg_dsn or None,
+                target_postgres_dsn=args.target_pg_dsn or None,
             )
         else:
             handles = orchestrator.start()
         log.info("environments_ready", base=handles.base_url, target=handles.target_url)
 
-        # Snapshot DB before workflows
-        pg_observer = None
-        pg_before = None
-        if manifest.database and handles.postgres_dsn:
-            pg_observer = PostgresObserver(handles.postgres_dsn)
-            tables = manifest.database.observe_tables
-            pg_before = pg_observer.snapshot(tables)
+        # Each version has its own database, so the postgres comparison is
+        # base-state vs target-state after the workflows run. Both were seeded
+        # identically, so rows the versions agree on cancel out and only real
+        # behavioral differences remain.
+        observe_db = bool(manifest.database and handles.base_postgres_dsn and handles.target_postgres_dsn)
+        if manifest.database and not observe_db:
+            log.warning(
+                "postgres_observation_skipped",
+                reason="a dsn is missing for one or both versions",
+            )
 
         # Run workflows
         workflow_results = run_workflows(manifest.workflows, handles)
@@ -98,9 +108,12 @@ def main() -> int:
 
         # Observe Postgres
         pg_diff = None
-        if pg_observer and pg_before is not None:
-            pg_after = pg_observer.snapshot(tables)
-            pg_diff = PostgresObserver.diff(pg_before, pg_after)
+        if observe_db:
+            assert manifest.database is not None
+            tables = manifest.database.observe_tables
+            base_snapshot = PostgresObserver(handles.base_postgres_dsn).snapshot(tables)
+            target_snapshot = PostgresObserver(handles.target_postgres_dsn).snapshot(tables)
+            pg_diff = PostgresObserver.diff(base_snapshot, target_snapshot)
 
         # Observe outbound calls
         outbound_diff = None
