@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import argparse
+import json
+import os
 import sys
 import time
 from pathlib import Path
 
 import structlog
 
+from ai.classifier import ClassificationError, ClassificationResult, classify_findings
+from ai.intent import ChangeIntent, IntentExtractionError, extract_intent
 from engine.manifest import load_manifest, ManifestError
 from engine.orchestrator import Orchestrator, OrchestratorError, RunHandles
 from engine.runner import run_workflows, RunnerError
@@ -57,6 +61,16 @@ def main() -> int:
         "--target-pg-dsn",
         help="Postgres connection string for the target version "
              "(required with --target-url for DB observation).",
+    )
+    parser.add_argument(
+        "--diff",
+        type=Path,
+        help="Path to a file containing the git diff of the change. Enables AI "
+             "classification of findings against the change's intent.",
+    )
+    parser.add_argument(
+        "--pr-description",
+        help="PR description for the change, used alongside --diff to extract intent.",
     )
     args = parser.parse_args()
 
@@ -145,11 +159,31 @@ def main() -> int:
             duration_seconds=round(duration, 2),
         )
 
+        # AI layer: intent extraction + finding classification. Advisory only —
+        # the findings above are already final, so any failure here degrades to
+        # plain output rather than failing the run.
+        intent = None
+        classification = None
+        if args.diff:
+            intent, classification = _classify(
+                args.diff, args.pr_description, result.findings
+            )
+
         # Output
         if args.json_output:
-            print(result.model_dump_json(indent=2))
+            payload = result.model_dump(mode="json")
+            if intent is not None:
+                payload["intent"] = intent.model_dump(mode="json")
+            if classification is not None:
+                payload["classification"] = classification.model_dump(mode="json")
+            print(json.dumps(payload, indent=2))
         else:
-            _print_human(result, verbose=args.verbose)
+            _print_human(
+                result,
+                verbose=args.verbose,
+                intent=intent,
+                classification=classification,
+            )
 
         return 0 if not result.findings else 1
 
@@ -161,9 +195,63 @@ def main() -> int:
             orchestrator.cleanup()
 
 
-def _print_human(result, *, verbose: bool = False) -> None:
+def _classify(
+    diff_path: Path,
+    pr_description: str | None,
+    findings: list,
+) -> tuple[ChangeIntent | None, ClassificationResult | None]:
+    """Extract intent from the diff and classify findings against it.
+
+    Returns (None, None) when the AI layer can't run or fails — the engine's
+    findings are complete without it, so a missing API key or a bad reply
+    should not cost the user their comparison.
+    """
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        log.warning(
+            "ai_classification_skipped",
+            reason="ANTHROPIC_API_KEY is not set",
+        )
+        return None, None
+
+    try:
+        diff = diff_path.read_text()
+    except OSError as exc:
+        log.error("diff_read_failed", path=str(diff_path), error=str(exc))
+        return None, None
+
+    try:
+        intent = extract_intent(diff, pr_description)
+    except IntentExtractionError as exc:
+        log.error("intent_extraction_failed", error=str(exc))
+        return None, None
+
+    try:
+        return intent, classify_findings(findings, intent)
+    except ClassificationError as exc:
+        log.error("classification_failed", error=str(exc))
+        return intent, None
+
+
+def _print_human(
+    result,
+    *,
+    verbose: bool = False,
+    intent: ChangeIntent | None = None,
+    classification: ClassificationResult | None = None,
+) -> None:
     findings = result.findings
     noise = result.noise_summary
+
+    if intent is not None:
+        print(f"\n  Intent: {intent.summary}")
+        if intent.expected_behavior_changes:
+            print("  Expected changes:")
+            for change in intent.expected_behavior_changes:
+                print(f"    - {change}")
+
+    labels = {}
+    if classification is not None:
+        labels = {c.finding_index: c for c in classification.classifications}
 
     if not findings:
         print("\n  No behavioral differences found.\n")
@@ -172,18 +260,25 @@ def _print_human(result, *, verbose: bool = False) -> None:
         return
 
     print(f"\n  {len(findings)} finding(s):\n")
-    for i, f in enumerate(findings, 1):
+    for i, f in enumerate(findings):
         icon = {"changed": "~", "added": "+", "removed": "-"}.get(f.severity, "?")
-        print(f"  [{icon}] {f.category} | {f.summary}")
+        label = labels.get(i)
+        prefix = f"[{label.classification}] " if label else ""
+        print(f"  [{icon}] {prefix}{f.category} | {f.summary}")
         if f.workflow_name:
             print(f"      workflow: {f.workflow_name}", end="")
             if f.step_index is not None:
                 print(f", step {f.step_index}", end="")
             print()
+        if label:
+            print(f"      {label.reasoning} (confidence {label.confidence:.2f})")
         if verbose:
             print(f"      base:   {f.evidence_base}")
             print(f"      target: {f.evidence_target}")
         print()
+
+    if classification is not None:
+        print(f"  Assessment: {classification.summary}\n")
 
     if noise and noise.total_suppressed > 0:
         print(f"  ({noise.total_suppressed} differences suppressed by normalization)\n")
