@@ -13,6 +13,7 @@ import structlog
 
 from ai.classifier import ClassificationError, ClassificationResult, classify_findings
 from ai.intent import ChangeIntent, IntentExtractionError, extract_intent
+from ai.manifest_gen import ManifestGenerationError, generate_manifest, scan_repo
 from ai.scaffold import extract_routes_from_diff, extract_tables_from_diff
 from ai.workflow_gen import (
     WorkflowGenerationError,
@@ -37,7 +38,27 @@ def main() -> int:
     parser.add_argument(
         "manifest",
         type=Path,
-        help="Path to the behaviordiff.yaml manifest file.",
+        nargs="?",
+        help="Path to the behaviordiff.yaml manifest file. With --init, the path "
+             "to the repository to scan instead (defaults to the current directory).",
+    )
+    parser.add_argument(
+        "--init",
+        action="store_true",
+        help="Scan a repository and write a starter manifest to behaviordiff.yaml. "
+             "Requires ANTHROPIC_API_KEY.",
+    )
+    parser.add_argument(
+        "--base-ref",
+        default="main",
+        help="Git ref for the base version, written into the generated manifest "
+             "(--init only). Default: main.",
+    )
+    parser.add_argument(
+        "--target-ref",
+        default="HEAD",
+        help="Git ref for the target version, written into the generated manifest "
+             "(--init only). Default: HEAD.",
     )
     parser.add_argument(
         "--json",
@@ -84,6 +105,12 @@ def main() -> int:
         help="Propose workflows that exercise the change. Requires --diff.",
     )
     args = parser.parse_args()
+
+    if args.init:
+        return _run_init(args)
+
+    if args.manifest is None:
+        parser.error("a manifest path is required (or pass --init to generate one)")
 
     if args.generate_workflows and not args.diff:
         parser.error("--generate-workflows requires --diff")
@@ -214,6 +241,90 @@ def main() -> int:
     finally:
         if orchestrator:
             orchestrator.cleanup()
+
+
+def _run_init(args) -> int:
+    """Scan a repository and write a starter manifest.
+
+    Unlike the rest of the AI layer this is not advisory — generating a manifest
+    is the entire point of the command, so a missing key or a failed call is an
+    error, not a degraded run.
+    """
+    repo_path = args.manifest or Path(".")
+
+    if not repo_path.is_dir():
+        print(f"Error: not a directory: {repo_path}", file=sys.stderr)
+        return 1
+
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        print(
+            "Error: --init needs ANTHROPIC_API_KEY to be set.\n"
+            "It generates the manifest with Claude; there is nothing to fall back on.",
+            file=sys.stderr,
+        )
+        return 1
+
+    # generate_manifest scans the repo itself. Scanning here as well costs one
+    # extra pass over local files and lets the user see what context went in
+    # before the call is made, rather than only what came back out.
+    try:
+        context = scan_repo(str(repo_path))
+    except ManifestGenerationError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    _print_scan(context, repo_path)
+
+    try:
+        manifest_yaml = generate_manifest(
+            str(repo_path),
+            base_ref=args.base_ref,
+            target_ref=args.target_ref,
+            pr_description=args.pr_description,
+        )
+    except ManifestGenerationError as exc:
+        print(f"Error: manifest generation failed: {exc}", file=sys.stderr)
+        return 2
+
+    out_path = repo_path / "behaviordiff.yaml"
+    if out_path.exists():
+        fallback = repo_path / "behaviordiff.generated.yaml"
+        print(f"\n  Warning: {out_path} already exists, writing to {fallback} instead.")
+        out_path = fallback
+
+    try:
+        out_path.write_text(manifest_yaml)
+    except OSError as exc:
+        print(f"Error: could not write {out_path}: {exc}", file=sys.stderr)
+        return 2
+
+    print(f"\n  Wrote {out_path}")
+    print("  Review it before running — the workflows and observed tables are proposals.\n")
+    return 0
+
+
+def _print_scan(context, repo_path: Path) -> None:
+    """Show what the scan found, so the user can judge the input to the model."""
+    print(f"\n  Scanned {repo_path}")
+    print(f"    Dockerfile:  {'found' if context.dockerfile else 'not found'}")
+    print(f"    Port:        {context.app_port if context.app_port is not None else 'not detected'}")
+    print(f"    Start:       {context.start_command or 'not detected'}")
+
+    print(f"    Routes:      {len(context.routes)}")
+    for route in context.routes:
+        print(f"      {route}")
+
+    print(f"    Tables:      {len(context.tables)}")
+    for table in context.tables:
+        print(f"      {table}")
+
+    if context.seed_files:
+        print(f"    SQL files:   {', '.join(context.seed_files)}")
+    if context.healthcheck_candidates:
+        print(f"    Healthcheck: {', '.join(context.healthcheck_candidates)}")
+
+    if not context.routes:
+        print("\n  No routes were detected — the generated manifest will be a skeleton.")
+    print()
 
 
 def _read_diff(diff_path: Path) -> str | None:
