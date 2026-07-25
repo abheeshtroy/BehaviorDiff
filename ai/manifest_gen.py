@@ -69,6 +69,12 @@ TABLE_EXTENSIONS = ROUTE_EXTENSIONS | {".sql"}
 # route declarations we need.
 MAX_FILE_BYTES = 512_000
 
+# Route-handler source is sent to Claude verbatim so it can read the real request
+# schemas and DB queries. These caps keep that from blowing up the prompt: at most
+# this many files, each truncated to this many lines.
+MAX_ROUTE_SOURCE_FILES = 5
+MAX_ROUTE_SOURCE_LINES = 500
+
 # Paths an app is likely to expose purely to say "I'm up". Matched as suffixes so
 # a prefixed route like /api/health is recognized too.
 HEALTH_SUFFIXES = (
@@ -132,6 +138,10 @@ class RepoContext(BaseModel):
     app_port: int | None = None
     start_command: str | None = None
     healthcheck_candidates: list[str] = Field(default_factory=list)
+    # filepath -> file contents, for files that declared at least one route.
+    # Sent to Claude so it can read the actual request schemas and DB queries
+    # rather than guess them from the route path alone.
+    route_source_files: dict[str, str] = Field(default_factory=dict)
 
 
 def _as_context_diff(text: str) -> str:
@@ -190,6 +200,17 @@ def _walk_source_files(repo: Path) -> list[Path]:
         for filename in sorted(filenames):
             found.append(Path(dirpath) / filename)
     return found
+
+
+def _truncate_source(text: str) -> str:
+    """Keep the first MAX_ROUTE_SOURCE_LINES lines, marking any that were dropped."""
+    lines = text.splitlines()
+    if len(lines) <= MAX_ROUTE_SOURCE_LINES:
+        return text
+    kept = lines[:MAX_ROUTE_SOURCE_LINES]
+    dropped = len(lines) - MAX_ROUTE_SOURCE_LINES
+    kept.append(f"# ... truncated {dropped} more line(s) ...")
+    return "\n".join(kept)
 
 
 def _extract_orm_tables(text: str) -> list[str]:
@@ -297,6 +318,7 @@ def scan_repo(repo_path: str) -> RepoContext:
     tables: list[str] = []
     seed_files: list[str] = []
     port_sources: list[str] = []
+    route_source_files: dict[str, str] = {}
 
     for path in _walk_source_files(repo):
         relative = path.relative_to(repo).as_posix()
@@ -322,8 +344,13 @@ def scan_repo(repo_path: str) -> RepoContext:
 
         as_diff = _as_context_diff(text)
         if suffix in ROUTE_EXTENSIONS:
-            routes.extend(extract_routes_from_diff(as_diff))
+            file_routes = extract_routes_from_diff(as_diff)
+            routes.extend(file_routes)
             port_sources.append(text)
+            # Keep the source of route-declaring files (up to the cap) so the
+            # prompt can show Claude the real request schemas, not just paths.
+            if file_routes and len(route_source_files) < MAX_ROUTE_SOURCE_FILES:
+                route_source_files[relative] = _truncate_source(text)
         if suffix in TABLE_EXTENSIONS:
             tables.extend(extract_tables_from_diff(as_diff))
             tables.extend(_extract_orm_tables(text))
@@ -339,6 +366,7 @@ def scan_repo(repo_path: str) -> RepoContext:
         app_port=_extract_port(dockerfile, start_command, port_sources),
         start_command=start_command,
         healthcheck_candidates=_healthcheck_candidates(routes),
+        route_source_files=route_source_files,
     )
     log.info(
         "repo_scanned",
@@ -348,6 +376,7 @@ def scan_repo(repo_path: str) -> RepoContext:
         tables=len(context.tables),
         seed_files=len(context.seed_files),
         app_port=context.app_port,
+        route_source_files=len(context.route_source_files),
     )
     return context
 
@@ -451,6 +480,17 @@ def _user_message(
 
     if context.seed_files:
         parts.append("SQL files found:\n" + "\n".join(f"- {p}" for p in context.seed_files))
+
+    if context.route_source_files:
+        blocks = [
+            "## Source code of route handlers\n\n"
+            "These files contain the route definitions. Use them to determine the "
+            "exact request body schemas, response formats, and database "
+            "interactions for each endpoint."
+        ]
+        for filepath, source in context.route_source_files.items():
+            blocks.append(f"### {filepath}\n```python\n{source}\n```")
+        parts.append("\n\n".join(blocks))
 
     return "\n\n".join(parts)
 

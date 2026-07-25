@@ -156,6 +156,44 @@ def test_scan_repo_extracts_everything_from_a_populated_repo(sample_repo: Path):
     assert context.app_port == 8000
     assert context.start_command == "uvicorn app:app --host 0.0.0.0"
     assert context.healthcheck_candidates == ["/health"]
+    # The one route-declaring file is captured verbatim; seed.sql declares no
+    # routes and Dockerfile is not a route extension, so neither appears.
+    assert set(context.route_source_files) == {"app/main.py"}
+    assert context.route_source_files["app/main.py"] == APP_PY
+
+
+def test_scan_repo_excludes_files_without_routes_from_source(tmp_path: Path):
+    _write(tmp_path, "app/main.py", APP_PY)
+    # A Python file with tables but no route declarations.
+    _write(tmp_path, "app/models.py", 'class Order(Base):\n    __tablename__ = "orders"\n')
+
+    context = scan_repo(str(tmp_path))
+
+    assert set(context.route_source_files) == {"app/main.py"}
+    assert "app/models.py" not in context.route_source_files
+
+
+def test_scan_repo_caps_route_source_files_at_five(tmp_path: Path):
+    for i in range(8):
+        _write(tmp_path, f"routes/r{i}.py", f'@app.get("/r{i}")\ndef r{i}(): ...\n')
+
+    context = scan_repo(str(tmp_path))
+
+    assert len(context.route_source_files) == 5
+
+
+def test_scan_repo_truncates_source_over_500_lines(tmp_path: Path):
+    body = "\n".join(f"    x{i} = {i}" for i in range(600))
+    long_handler = f'@app.get("/big")\ndef big():\n{body}\n'
+    _write(tmp_path, "app/main.py", long_handler)
+
+    source = scan_repo(str(tmp_path)).route_source_files["app/main.py"]
+
+    # 500 kept lines plus one truncation marker; the tail is gone.
+    assert len(source.splitlines()) == 501
+    assert "truncated" in source
+    assert "x599 = 599" not in source
+    assert "x400 = 400" in source
 
 
 def test_scan_repo_on_empty_directory_returns_empty_context(tmp_path: Path):
@@ -437,6 +475,18 @@ def test_scan_results_are_sent_as_the_user_message(sample_repo: Path):
     assert "8000" in content
     assert "uvicorn app:app" in content
     assert "/health" in content
+
+
+def test_route_handler_source_reaches_the_prompt(sample_repo: Path):
+    stub = _StubClient(text=VALID_MANIFEST)
+    with _patch_client(stub):
+        generate_manifest(str(sample_repo))
+
+    content = stub.calls[0]["messages"][0]["content"]
+    assert "## Source code of route handlers" in content
+    assert "### app/main.py" in content
+    # The real handler body — the reason to send source at all — is present.
+    assert "async def create_cart(payload: dict):" in content
 
 
 def test_refs_and_pr_description_reach_the_prompt(sample_repo: Path):

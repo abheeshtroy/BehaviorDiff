@@ -1,0 +1,162 @@
+app:
+  name: checkout-service
+  start: uvicorn app.main:app --host 0.0.0.0 --port 8000
+  port: 8000
+  healthcheck: /health
+  dockerfile: Dockerfile
+
+database:
+  type: postgres
+  seed: seed.sql
+  observe_tables:
+    - carts
+    - orders
+    # jobs is included because fulfillment likely enqueues background work
+    - jobs
+
+outbound: null # TODO: add outbound services if the app calls external HTTP APIs (e.g. payment, tax, shipping)
+
+compare:
+  base_ref: main
+  target_ref: fix/checkout-validation
+  repo: .
+
+workflows:
+  - name: create_cart_and_checkout
+    steps:
+      - method: POST
+        path: /api/carts
+        body:
+          items:
+            - sku: WIDGET-1
+              quantity: 2
+              unit_price: 19.99
+        capture:
+          cart_id: $.cart_id
+
+      - method: POST
+        path: /api/checkout
+        body:
+          cart_id: "{cart_id}"
+          customer:
+            email: alice@example.com
+            name: Alice Smith
+          payment:
+            method: card
+            token: tok_test_visa
+        capture:
+          order_id: $.order_id
+
+      - method: GET
+        path: /api/orders/{order_id}
+
+  - name: checkout_with_discount
+    steps:
+      - method: POST
+        path: /api/carts
+        body:
+          items:
+            - sku: GADGET-9
+              quantity: 1
+              unit_price: 99.00
+        capture:
+          cart_id: $.cart_id
+
+      - method: POST
+        path: /api/carts/{cart_id}/discount
+        body:
+          code: SAVE10
+
+      - method: POST
+        path: /api/checkout
+        body:
+          cart_id: "{cart_id}"
+          customer:
+            email: bob@example.com
+            name: Bob Jones
+          payment:
+            method: card
+            token: tok_test_visa
+        capture:
+          order_id: $.order_id
+
+      - method: GET
+        path: /api/orders/{order_id}
+
+  - name: fulfill_order
+    steps:
+      - method: POST
+        path: /api/carts
+        body:
+          items:
+            - sku: PART-42
+              quantity: 3
+              unit_price: 5.50
+        capture:
+          cart_id: $.cart_id
+
+      - method: POST
+        path: /api/checkout
+        body:
+          cart_id: "{cart_id}"
+          customer:
+            email: carol@example.com
+            name: Carol White
+          payment:
+            method: card
+            token: tok_test_visa
+        capture:
+          order_id: $.order_id
+
+      - method: POST
+        path: /api/orders/{order_id}/fulfill
+        body:
+          warehouse: WH-EAST # TODO: confirm the fulfillment request body fields
+
+      - method: GET
+        path: /api/orders/{order_id}
+
+  - name: checkout_invalid_cart
+    steps:
+      - method: POST
+        path: /api/checkout
+        body:
+          cart_id: "00000000-0000-0000-0000-000000000000"
+          customer:
+            email: ghost@example.com
+            name: Ghost User
+          payment:
+            method: card
+            token: tok_test_visa
+
+  - name: discount_invalid_code
+    steps:
+      - method: POST
+        path: /api/carts
+        body:
+          items:
+            - sku: THING-7
+              quantity: 1
+              unit_price: 40.00
+        capture:
+          cart_id: $.cart_id
+
+      - method: POST
+        path: /api/carts/{cart_id}/discount
+        body:
+          code: NOTACODE
+
+normalize:
+  ignore_fields:
+    - "*.created_at"
+    - "*.updated_at"
+    - "*.fulfilled_at"
+    - "*.timestamp"
+  uuid_fields:
+    - "*.cart_id"
+    - "*.order_id"
+    - "*.job_id"
+  numeric_tolerance: 0.0
+  ignore_row_order:
+    - orders
+    - jobs
