@@ -26,6 +26,7 @@ from engine.runner import run_workflows, RunnerError
 from engine.observers.http import HttpObserver
 from engine.observers.postgres import PostgresObserver
 from engine.comparator import compare
+from web.store import save_run
 
 log = structlog.get_logger(__name__)
 
@@ -213,6 +214,19 @@ def main() -> int:
             )
             if args.generate_workflows:
                 proposal = _propose_workflows(diff, args.pr_description)
+
+        # Persist to SQLite for web dashboard
+        result_payload = result.model_dump(mode="json")
+        intent_payload = intent.model_dump(mode="json") if intent else None
+        classification_payload = classification.model_dump(mode="json") if classification else None
+        _save_run_id = save_run(
+            manifest_path=str(args.manifest),
+            app_name=manifest.app.name,
+            result=result_payload,
+            intent=intent_payload,
+            classification=classification_payload,
+        )
+        log.info("run_persisted", run_id=_save_run_id)
 
         # Output
         if args.json_output:
