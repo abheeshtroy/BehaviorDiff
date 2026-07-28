@@ -28,7 +28,7 @@ export default function Landing() {
           and surfaces every difference in responses, database state, side effects, and timing.
         </p>
         <div className="hero-btns hero-fade" style={{ animationDelay: `${tailDelay + 0.14}s` }}>
-          <Link to="/runs"><button className="btn-pri">Try a live comparison</button></Link>
+          <Link to="/demo/checkout-validation"><button className="btn-pri">Try a live comparison</button></Link>
           <a href="https://github.com/abheeshtroy/BehaviorDiff" target="_blank" rel="noopener noreferrer">
             <button className="btn-sec">View source</button>
           </a>
@@ -69,19 +69,19 @@ export default function Landing() {
 
       <div className="section-title">Try it yourself</div>
       <div className="demos">
-        <Link to="/runs" className="demo-card">
+        <Link to="/demo/checkout-validation" className="demo-card">
           <div className="demo-icon" style={{ color: "var(--red)" }}>⊘</div>
           <div className="demo-name">Checkout validation fix</div>
           <div className="demo-desc">Four-line fix that silently breaks discounts and charges on failure</div>
           <span className="demo-tag tag-red">3 regressions</span>
         </Link>
-        <Link to="/runs" className="demo-card">
+        <Link to="/demo/retry-logic" className="demo-card">
           <div className="demo-icon" style={{ color: "var(--amber)" }}>↻</div>
           <div className="demo-name">Retry logic refactor</div>
           <div className="demo-desc">Background job retry that schedules duplicate work</div>
           <span className="demo-tag tag-amber">2 regressions</span>
         </Link>
-        <Link to="/runs" className="demo-card">
+        <Link to="/demo/api-cleanup" className="demo-card">
           <div className="demo-icon" style={{ color: "var(--purple)" }}>⟐</div>
           <div className="demo-name">API response cleanup</div>
           <div className="demo-desc">Field rename that breaks downstream consumers</div>
@@ -110,7 +110,7 @@ export default function Landing() {
 
       <div className="cta-block">
         <p>Code review shows what changed in the source. BehaviorDiff shows what changed in the software.</p>
-        <Link to="/runs"><button className="btn-pri">Try a live comparison</button></Link>
+        <Link to="/demo/checkout-validation"><button className="btn-pri">Try a live comparison</button></Link>
       </div>
     </div>
   );

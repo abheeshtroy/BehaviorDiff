@@ -798,3 +798,166 @@ a { color: inherit; text-decoration: none; }
 .shaft-r4::before { background: linear-gradient(180deg, rgba(255,125,116,0.24) 0%, transparent 64%); }
 
 .trace-svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+
+/* ---- Demo run ---- */
+.demo-page { padding: 24px 0 64px; }
+.demo-pane { animation: paneIn 0.4s cubic-bezier(0.16,1,0.3,1); }
+@keyframes paneIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+
+.stage-label {
+  font-family: var(--mono); font-size: 10px; color: var(--text-3);
+  text-transform: uppercase; letter-spacing: 0.08em;
+  margin: 18px 0 14px; display: flex; align-items: center; gap: 8px;
+}
+.stage-num { background: var(--bg-2); border-radius: 3px; padding: 2px 7px; }
+
+.code-block {
+  background: var(--bg-1); border: 1px solid var(--border);
+  border-radius: 12px; padding: 0 0 12px; margin-bottom: 14px; overflow: hidden;
+}
+.code-file {
+  font-family: var(--mono); font-size: 11px; color: var(--text-3);
+  padding: 10px 16px; border-bottom: 1px solid var(--border); margin-bottom: 10px;
+}
+.code-line { display: flex; gap: 14px; font-family: var(--mono); font-size: 12px; line-height: 1.9; padding: 0 16px; }
+.code-num { color: var(--text-3); min-width: 20px; text-align: right; font-size: 11px; }
+.code-text { white-space: pre; }
+.code-ctx .code-text { color: var(--text-3); }
+.code-add { background: rgba(52,211,153,0.05); }
+.code-add .code-text { color: var(--green); }
+.code-rem { background: rgba(248,113,113,0.05); }
+.code-rem .code-text { color: var(--red); }
+
+.check-row { display: flex; gap: 6px; margin-bottom: 22px; }
+.check { font-family: var(--mono); font-size: 10.5px; padding: 4px 10px; border-radius: 6px; }
+.check-ok { background: var(--green-bg); color: var(--green); border: 1px solid var(--green-border); }
+.check-info { background: var(--blue-bg); color: var(--blue); border: 1px solid var(--blue-border); }
+
+.ask-line { font-size: 15px; color: var(--text-0); margin-bottom: 12px; }
+.ask-btns { display: flex; gap: 8px; }
+.btn-approve {
+  background: var(--green); color: #04140d; border: none;
+  padding: 9px 24px; border-radius: var(--radius);
+  font-size: 13.5px; font-weight: 500; font-family: var(--sans); cursor: pointer;
+}
+.btn-approve:hover { opacity: 0.9; }
+
+.lane { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+.lane-name { font-family: var(--mono); font-size: 11px; color: var(--text-3); min-width: 60px; text-align: right; }
+.lane-track { display: flex; gap: 5px; flex: 1; }
+.lane-blk {
+  flex: 1; height: 32px; border-radius: 6px;
+  background: var(--bg-1); border: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--mono); font-size: 10.5px; color: var(--text-3);
+  opacity: 0; transform: scale(0.92);
+  transition: all 0.3s cubic-bezier(0.16,1,0.3,1);
+}
+.lane-blk.in { opacity: 1; transform: scale(1); }
+.lane-blk.ok { background: var(--green-bg); border-color: var(--green-border); color: var(--green); }
+.lane-blk.bad { background: var(--red-bg); border-color: var(--red-border); color: var(--red); }
+
+.diverge-marker {
+  display: flex; align-items: center; gap: 8px;
+  margin: 0 0 8px 72px; font-family: var(--mono); font-size: 10.5px;
+  color: var(--red); opacity: 0; transition: opacity 0.4s;
+}
+.diverge-marker.in { opacity: 1; }
+.diverge-line { flex: 1; height: 1px; background: var(--red-border); }
+
+.run-meter { display: flex; align-items: center; gap: 12px; margin-top: 16px; font-family: var(--mono); font-size: 11px; color: var(--text-3); }
+.run-time { min-width: 34px; }
+.run-bar { flex: 1; height: 2px; background: var(--border); border-radius: 1px; overflow: hidden; }
+.run-fill { height: 100%; background: var(--blue); transition: width 0.3s linear; }
+.run-phase { min-width: 150px; }
+
+.verdict {
+  background: var(--bg-1); border-left: 2px solid var(--amber);
+  padding: 12px 16px; margin-bottom: 18px;
+  font-size: 13.5px; color: var(--text-1);
+  display: flex; gap: 10px; align-items: flex-start;
+  animation: paneIn 0.5s cubic-bezier(0.16,1,0.3,1);
+}
+.verdict-icon { color: var(--amber); flex-shrink: 0; }
+
+.demo-finding { opacity: 0; transform: translateX(-6px); transition: opacity 0.45s, transform 0.45s; }
+.demo-finding.in { opacity: 1; transform: translateX(0); }
+.demo-noise { opacity: 0; transition: opacity 0.45s; }
+.demo-noise.in { opacity: 1; }
+
+.results-actions { display: flex; gap: 8px; margin-top: 22px; }
+
+@media (max-width: 700px) {
+  .lane-blk { font-size: 9px; }
+  .run-phase { display: none; }
+}
+
+
+
+/* ---- Demo page background ---- */
+.demobg {
+  position: fixed;
+  top: 48px; left: 0;
+  width: 100vw; height: calc(100vh - 48px);
+  z-index: -1;
+  pointer-events: none;
+  overflow: hidden;
+  opacity: 0;
+  animation: lightsUp 1.6s cubic-bezier(0.4, 0, 0.2, 1) 0.1s forwards;
+}
+@keyframes lightsUp { to { opacity: 1; } }
+
+.col {
+  position: absolute;
+  top: -140px; height: 820px;
+  width: 30%;
+  filter: blur(38px);
+  transition: opacity 1.6s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.col-base {
+  left: 9%;
+  background: linear-gradient(180deg,
+    rgba(55,255,230,0.44) 0%,
+    rgba(36,205,198,0.17) 34%,
+    rgba(24,150,160,0.05) 58%,
+    transparent 80%);
+}
+.col-target {
+  right: 9%;
+  background: linear-gradient(180deg,
+    rgba(255,140,130,0.38) 0%,
+    rgba(222,82,94,0.15) 34%,
+    rgba(180,60,75,0.045) 58%,
+    transparent 80%);
+}
+.col-base.recede { opacity: 0.22; }
+.col-target.intensify { opacity: 1.9; }
+
+.col-mid {
+  position: absolute;
+  top: 0; bottom: 0; left: 50%;
+  width: 1px;
+  background: linear-gradient(180deg,
+    transparent 0%,
+    rgba(255,255,255,0.09) 16%,
+    rgba(255,255,255,0.17) 46%,
+    rgba(255,255,255,0.06) 76%,
+    transparent 100%);
+}
+
+.demo-vignette {
+  position: absolute; inset: 0;
+  background: radial-gradient(ellipse 84% 72% at 50% 26%,
+    transparent 46%,
+    rgba(4,4,16,0.38) 78%,
+    rgba(4,4,16,0.74) 100%);
+}
+
+/* content is already in place; only the light comes up */
+.demo-pane { animation: contentIn 1.1s cubic-bezier(0.4, 0, 0.2, 1) forwards; }
+@keyframes contentIn { from { opacity: 0; } to { opacity: 1; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .demobg, .demo-pane { animation: none; opacity: 1; }
+  .col { transition: none; }
+}

@@ -6,27 +6,16 @@ import argparse
 import json
 import os
 import sys
-import time
 from pathlib import Path
 
 import structlog
 
-from ai.classifier import ClassificationError, ClassificationResult, classify_findings
-from ai.intent import ChangeIntent, IntentExtractionError, extract_intent
+from ai.classifier import ClassificationResult
+from ai.intent import ChangeIntent
 from ai.manifest_gen import ManifestGenerationError, generate_manifest, scan_repo
-from ai.scaffold import extract_routes_from_diff, extract_tables_from_diff
-from ai.workflow_gen import (
-    WorkflowGenerationError,
-    WorkflowProposal,
-    generate_workflows,
-)
+from ai.workflow_gen import WorkflowProposal
 from engine.manifest import load_manifest, ManifestError
-from engine.orchestrator import Orchestrator, OrchestratorError, RunHandles
-from engine.runner import run_workflows, RunnerError
-from engine.observers.http import HttpObserver
-from engine.observers.postgres import PostgresObserver
-from engine.comparator import compare
-from web.store import save_run
+from engine.pipeline import RunEvent, run_pipeline
 
 log = structlog.get_logger(__name__)
 
@@ -124,137 +113,86 @@ def main() -> int:
 
     log.info("manifest_loaded", app=manifest.app.name, workflows=len(manifest.workflows))
 
-    use_direct = args.base_url and args.target_url
-    orchestrator = None if use_direct else Orchestrator(manifest)
-    try:
-        start = time.monotonic()
-        if use_direct:
-            handles = RunHandles(
-                base_url=args.base_url.rstrip("/"),
-                target_url=args.target_url.rstrip("/"),
-                base_postgres_dsn=args.base_pg_dsn or None,
-                target_postgres_dsn=args.target_pg_dsn or None,
+    # The pipeline owns the run; this loop only turns its events back into the
+    # log lines the CLI has always printed, and renders the terminal event.
+    terminal: RunEvent | None = None
+    for event in run_pipeline(
+        manifest,
+        manifest_path=str(args.manifest),
+        base_url=args.base_url,
+        target_url=args.target_url,
+        base_pg_dsn=args.base_pg_dsn,
+        target_pg_dsn=args.target_pg_dsn,
+        diff_text=_read_diff(args.diff) if args.diff else None,
+        pr_description=args.pr_description,
+        generate_workflows=args.generate_workflows,
+    ):
+        if event.stage == "environments_ready":
+            log.info(
+                "environments_ready",
+                base=event.data["base_url"],
+                target=event.data["target_url"],
             )
-        else:
-            handles = orchestrator.start()
-        log.info("environments_ready", base=handles.base_url, target=handles.target_url)
+        elif event.stage == "postgres_observation_skipped":
+            log.warning("postgres_observation_skipped", reason=event.data["reason"])
+        elif event.stage == "workflows_complete":
+            log.info("workflows_complete", count=event.data["count"])
+        elif event.stage == "done":
+            log.info("run_persisted", run_id=event.data["run_id"])
+            terminal = event
+        elif event.stage == "error":
+            terminal = event
 
-        # Each version has its own database, so there's no single "base-state vs
-        # target-state" snapshot to diff directly — the rows live in separate
-        # databases entirely. Instead we snapshot each database before and after
-        # the workflows run, diff each version against its own seed to get that
-        # version's delta, then compare the two deltas. Since both databases were
-        # seeded identically, a change both versions made in the same way cancels
-        # out and only real behavioral differences remain.
-        observe_db = bool(manifest.database and handles.base_postgres_dsn and handles.target_postgres_dsn)
-        if manifest.database and not observe_db:
-            log.warning(
-                "postgres_observation_skipped",
-                reason="a dsn is missing for one or both versions",
-            )
-
-        base_pg_before = target_pg_before = None
-        if observe_db:
-            assert manifest.database is not None
-            tables = manifest.database.observe_tables
-            base_pg_before = PostgresObserver(handles.base_postgres_dsn).snapshot(tables)
-            target_pg_before = PostgresObserver(handles.target_postgres_dsn).snapshot(tables)
-
-        # Run workflows
-        workflow_results = run_workflows(manifest.workflows, handles)
-        log.info("workflows_complete", count=len(workflow_results))
-
-        # Count total steps
-        total_steps = sum(len(wr.steps) for wr in workflow_results)
-
-        # Observe HTTP
-        http_observer = HttpObserver()
-        base_obs, target_obs = http_observer.observe(workflow_results)
-        http_diffs = HttpObserver.diff(base_obs, target_obs)
-
-        # Observe Postgres
-        pg_diff = None
-        if observe_db:
-            assert manifest.database is not None
-            assert base_pg_before is not None and target_pg_before is not None
-            tables = manifest.database.observe_tables
-            base_pg_after = PostgresObserver(handles.base_postgres_dsn).snapshot(tables)
-            target_pg_after = PostgresObserver(handles.target_postgres_dsn).snapshot(tables)
-            base_delta = PostgresObserver.diff(base_pg_before, base_pg_after)
-            target_delta = PostgresObserver.diff(target_pg_before, target_pg_after)
-            pg_diff = PostgresObserver.compare_deltas(base_delta, target_delta)
-
-        # Observe outbound calls
-        outbound_diff = None
-        # TODO: wire proxy observer once proxy is started by orchestrator
-
-        duration = time.monotonic() - start
-
-        # Compare
-        result = compare(
-            http_diffs=http_diffs,
-            postgres_diff=pg_diff,
-            outbound_diff=outbound_diff,
-            normalize_config=manifest.normalize,
-            total_workflows=len(workflow_results),
-            total_steps=total_steps,
-            duration_seconds=round(duration, 2),
-        )
-
-        # AI layer: intent extraction + finding classification. Advisory only —
-        # the findings above are already final, so any failure here degrades to
-        # plain output rather than failing the run.
-        intent = None
-        classification = None
-        proposal = None
-        diff = _read_diff(args.diff) if args.diff else None
-        if diff is not None:
-            intent, classification = _classify(
-                diff, args.pr_description, result.findings
-            )
-            if args.generate_workflows:
-                proposal = _propose_workflows(diff, args.pr_description)
-
-        # Persist to SQLite for web dashboard
-        result_payload = result.model_dump(mode="json")
-        intent_payload = intent.model_dump(mode="json") if intent else None
-        classification_payload = classification.model_dump(mode="json") if classification else None
-        _save_run_id = save_run(
-            manifest_path=str(args.manifest),
-            app_name=manifest.app.name,
-            result=result_payload,
-            intent=intent_payload,
-            classification=classification_payload,
-        )
-        log.info("run_persisted", run_id=_save_run_id)
-
-        # Output
-        if args.json_output:
-            payload = result.model_dump(mode="json")
-            if intent is not None:
-                payload["intent"] = intent.model_dump(mode="json")
-            if classification is not None:
-                payload["classification"] = classification.model_dump(mode="json")
-            if proposal is not None:
-                payload["proposed_workflows"] = proposal.model_dump(mode="json")
-            print(json.dumps(payload, indent=2))
-        else:
-            _print_human(
-                result,
-                verbose=args.verbose,
-                intent=intent,
-                classification=classification,
-                proposal=proposal,
-            )
-
-        return 0 if not result.findings else 1
-
-    except (OrchestratorError, RunnerError) as exc:
-        print(f"Error: {exc}", file=sys.stderr)
+    if terminal is None:
+        print("Error: the run ended without a result", file=sys.stderr)
         return 2
-    finally:
-        if orchestrator:
-            orchestrator.cleanup()
+
+    if terminal.stage == "error":
+        return _report_error(terminal)
+
+    return _report_result(terminal, args)
+
+
+def _report_error(event: RunEvent) -> int:
+    """Render a failed run.
+
+    Orchestrator and runner failures are the CLI's own error message and exit
+    code 2. Anything else is a bug in the engine, so the original exception is
+    re-raised rather than reported as an ordinary failed comparison.
+    """
+    if not event.data["expected"]:
+        raise event.data["exception"]
+    print(f"Error: {event.data['error']}", file=sys.stderr)
+    return 2
+
+
+def _report_result(event: RunEvent, args) -> int:
+    """Render a completed run and return the CLI's exit code."""
+    models = event.data["models"]
+    result = models["result"]
+    intent = models["intent"]
+    classification = models["classification"]
+    proposal = models["proposal"]
+
+    if args.json_output:
+        payload = dict(event.data["result"])
+        if intent is not None:
+            payload["intent"] = event.data["intent"]
+        if classification is not None:
+            payload["classification"] = event.data["classification"]
+        if proposal is not None:
+            payload["proposed_workflows"] = event.data["proposed_workflows"]
+        print(json.dumps(payload, indent=2))
+    else:
+        _print_human(
+            result,
+            verbose=args.verbose,
+            intent=intent,
+            classification=classification,
+            proposal=proposal,
+        )
+
+    return 0 if not result.findings else 1
 
 
 def _run_init(args) -> int:
@@ -351,64 +289,6 @@ def _read_diff(diff_path: Path) -> str | None:
         return diff_path.read_text()
     except OSError as exc:
         log.error("diff_read_failed", path=str(diff_path), error=str(exc))
-        return None
-
-
-def _classify(
-    diff: str,
-    pr_description: str | None,
-    findings: list,
-) -> tuple[ChangeIntent | None, ClassificationResult | None]:
-    """Extract intent from the diff and classify findings against it.
-
-    Returns (None, None) when the AI layer can't run or fails — the engine's
-    findings are complete without it, so a missing API key or a bad reply
-    should not cost the user their comparison.
-    """
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        log.warning(
-            "ai_classification_skipped",
-            reason="ANTHROPIC_API_KEY is not set",
-        )
-        return None, None
-
-    try:
-        intent = extract_intent(diff, pr_description)
-    except IntentExtractionError as exc:
-        log.error("intent_extraction_failed", error=str(exc))
-        return None, None
-
-    try:
-        return intent, classify_findings(findings, intent)
-    except ClassificationError as exc:
-        log.error("classification_failed", error=str(exc))
-        return intent, None
-
-
-def _propose_workflows(
-    diff: str,
-    pr_description: str | None,
-) -> WorkflowProposal | None:
-    """Suggest workflows that exercise the change described by the diff.
-
-    Advisory like the rest of the AI layer: returns None on any failure so a bad
-    reply costs the suggestion, not the run.
-    """
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        log.warning(
-            "workflow_generation_skipped",
-            reason="ANTHROPIC_API_KEY is not set",
-        )
-        return None
-
-    routes = extract_routes_from_diff(diff)
-    tables = extract_tables_from_diff(diff)
-    log.info("scaffold_extracted", routes=len(routes), tables=len(tables))
-
-    try:
-        return generate_workflows(diff, routes, tables, pr_description)
-    except WorkflowGenerationError as exc:
-        log.error("workflow_generation_failed", error=str(exc))
         return None
 
 
