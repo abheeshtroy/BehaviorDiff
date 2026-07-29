@@ -28,7 +28,7 @@ export default function Landing() {
           and surfaces every difference in responses, database state, side effects, and timing.
         </p>
         <div className="hero-btns hero-fade" style={{ animationDelay: `${tailDelay + 0.14}s` }}>
-          <Link to="/demo/checkout-validation"><button className="btn-pri">Try a live comparison</button></Link>
+          <Link to="/runs/new"><button className="btn-pri">Try a live comparison</button></Link>
           <a href="https://github.com/abheeshtroy/BehaviorDiff" target="_blank" rel="noopener noreferrer">
             <button className="btn-sec">View source</button>
           </a>
@@ -110,7 +110,6 @@ export default function Landing() {
 
       <div className="cta-block">
         <p>Code review shows what changed in the source. BehaviorDiff shows what changed in the software.</p>
-        <Link to="/demo/checkout-validation"><button className="btn-pri">Try a live comparison</button></Link>
       </div>
     </div>
   );

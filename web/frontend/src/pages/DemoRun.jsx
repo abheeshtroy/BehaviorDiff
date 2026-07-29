@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { SCENARIOS } from "../demoData";
 import DemoBackground from "../components/DemoBackground";
+import OrientationPanel from "../components/OrientationPanel";
+import StateNotice from "../components/StateNotice";
 
 const PHASES = [
   "starting containers",
@@ -69,7 +71,10 @@ export default function DemoRun() {
   const navigate = useNavigate();
   const s = SCENARIOS[scenarioId];
 
-  const [stage, setStage] = useState("review");
+  // "orient" runs once, on arrival: a cold visitor needs the problem before
+  // the diff means anything. reset() returns to "review", so replaying the
+  // scenario doesn't make you sit through the pitch again.
+  const [stage, setStage] = useState("orient");
   const [choice, setChoice] = useState(null);
   const [phase, setPhase] = useState(0);
   const [elapsed, setElapsed] = useState(0);
@@ -82,7 +87,21 @@ export default function DemoRun() {
 
   useEffect(() => () => timers.current.forEach(clearTimeout), []);
 
-  if (!s) return <p style={{ padding: "40px 0", color: "var(--text-3)" }}>Scenario not found.</p>;
+  if (!s) {
+    return (
+      <div className="demo-page">
+        <DemoBackground diverged={false} />
+        <Link to="/runs/new" className="back-link">← Back to scenarios</Link>
+        <StateNotice
+          variant="notfound"
+          title="No such scenario"
+          detail={`There is no scripted walkthrough called "${scenarioId}".`}
+        >
+          <Link to="/runs/new" className="btn-sec act-link">Pick a comparison</Link>
+        </StateNotice>
+      </div>
+    );
+  }
 
   const suspicious = s.findings.filter((f) => f.classification === "suspicious").length;
 
@@ -143,7 +162,9 @@ export default function DemoRun() {
   return (
     <div className="demo-page">
       <DemoBackground diverged={diverged} />
-      <Link to="/" className="back-link">← Demo scenarios</Link>
+      <Link to="/runs/new" className="back-link">← Back to scenarios</Link>
+
+      {stage === "orient" && <OrientationPanel onContinue={() => setStage("review")} />}
 
       {stage === "review" && (
         <div className="demo-pane">
@@ -263,8 +284,8 @@ export default function DemoRun() {
           </div>
 
           <div className="results-actions">
-            <button className="btn-sec" onClick={reset}>Try again</button>
-            <button className="btn-sec" onClick={() => navigate("/")}>Other scenarios</button>
+            <button className="btn-pri" onClick={() => navigate("/runs/new")}>Try another scenario</button>
+            <button className="btn-sec" onClick={reset}>Replay this one</button>
           </div>
         </div>
       )}

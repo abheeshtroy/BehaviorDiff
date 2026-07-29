@@ -1,6 +1,11 @@
+// `manifest` ties a scripted scenario to the real manifest that reproduces it,
+// so the picker can show one story per comparison and the bridge CTA can
+// preselect the right file. It is an explicit field, not derived: the
+// api-cleanup scenario lives in scenario3-response-cleanup.yaml.
 export const SCENARIOS = {
   "checkout-validation": {
     id: "checkout-validation",
+    manifest: "scenario1-checkout-validation.yaml",
     pr: "#482",
     title: "Fix checkout validation for empty carts",
     subtitle: "Rejects empty carts with a 400 instead of failing downstream with a 500.",
@@ -23,6 +28,20 @@ export const SCENARIOS = {
     },
     assessment: "Status change is intended. Discount clearing and the premature payment call are not explained by the diff.",
     suppressed: 12,
+    // Readable headlines for the findings a *real* run of this manifest
+    // produces, keyed by "category:severity:subject" (see findingKey in
+    // lib/findings.js). The comparator names the row it changed; these name
+    // what that meant. Written against observed output of the run — the raw
+    // summary and evidence stay on the card underneath.
+    //
+    // Only this scenario has them: it is the one wired to run end to end, so
+    // it is the only one whose real keys have been seen rather than guessed.
+    readable: {
+      "http:changed:POST /api/checkout": "Checkout rejects the bad address with a 400 instead of failing with a 500",
+      "postgres:added:carts": "Cart stored with its discount cleared",
+      "postgres:removed:carts": "The discounted cart no longer exists",
+      "postgres:added:payment_calls": "Card charged on a rejected order",
+    },
     findings: [
       {
         category: "http", classification: "intended", severity: "changed",
@@ -53,6 +72,7 @@ export const SCENARIOS = {
 
   "retry-logic": {
     id: "retry-logic",
+    manifest: "scenario2-retry-logic.yaml",
     pr: "#495",
     title: "Refactor background job retry logic",
     subtitle: "Moves retry scheduling into a decorator so it can be reused across jobs.",
@@ -97,6 +117,7 @@ export const SCENARIOS = {
 
   "api-cleanup": {
     id: "api-cleanup",
+    manifest: "scenario3-response-cleanup.yaml",
     pr: "#503",
     title: "Clean up order response payload",
     subtitle: "Renames a field for consistency with the rest of the API.",

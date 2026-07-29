@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { fetchRuns } from "../api";
+import DemoBackground from "../components/DemoBackground";
+import StateNotice from "../components/StateNotice";
 
 export default function RunList() {
   const [runs, setRuns] = useState([]);
@@ -14,26 +16,48 @@ export default function RunList() {
       .finally(() => setLoading(false));
   }, []);
 
-  if (loading) return <p style={{ color: "var(--text-3)", padding: "40px 0" }}>Loading…</p>;
-  if (error) return <p style={{ color: "var(--red)" }}>Error: {error}</p>;
+  // A secondary page, but the same product: same background, same states.
+  if (loading) {
+    return (
+      <div className="demo-page">
+        <DemoBackground diverged={false} />
+        <StateNotice variant="loading" title="Loading runs…" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="demo-page">
+        <DemoBackground diverged={false} />
+        <StateNotice variant="error" title="Could not reach the run server" detail={error}>
+          <Link to="/runs/new" className="btn-sec act-link">Back to scenarios</Link>
+        </StateNotice>
+      </div>
+    );
+  }
+
   if (runs.length === 0) {
     return (
-      <div className="empty-state">
-        <div className="empty-icon">◇</div>
-        <p className="empty-title">No runs yet</p>
-        <p className="empty-hint">Run <code>behaviordiff manifest.yaml</code> to see results here</p>
-        <div style={{ marginTop: "20px" }}>
-          <Link to="/runs/new" className="btn-sec stream-link-btn">Run a comparison</Link>
-        </div>
+      <div className="demo-page">
+        <DemoBackground diverged={false} />
+        <StateNotice
+          variant="empty"
+          title="No runs yet"
+          detail={<>Every comparison you run for real is stored here.</>}
+        >
+          <Link to="/runs/new" className="btn-sec act-link">Back to scenarios</Link>
+        </StateNotice>
       </div>
     );
   }
 
   return (
-    <div style={{ paddingTop: "32px" }}>
+    <div className="demo-page">
+      <DemoBackground diverged={false} />
       <div className="list-head">
         <div className="sec-label" style={{ marginBottom: 0 }}>Recent runs</div>
-        <Link to="/runs/new" className="btn-sec stream-link-btn">Run a comparison</Link>
+        <Link to="/runs/new" className="btn-sec stream-link-btn">Back to scenarios</Link>
       </div>
       {runs.map((run) => (
         <Link key={run.id} to={`/runs/${run.id}`} className="run-card">

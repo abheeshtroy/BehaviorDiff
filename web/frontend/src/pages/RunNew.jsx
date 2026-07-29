@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { fetchManifests, runStreamUrl, triggerRun } from "../api";
+import DemoBackground from "../components/DemoBackground";
+import OrientationPanel from "../components/OrientationPanel";
+import StateNotice from "../components/StateNotice";
+import { scenarioForManifest, watchLine } from "../lib/scenarios";
+import { noteRunFailure, realRunsAvailable } from "../lib/runMode";
+import { hasDiverged } from "../lib/stream";
+import { phaseStates } from "../lib/phases";
 
 // The stream is a real log, not a fixed sequence: the pipeline yields one
 // workflow_started/workflow_completed pair per workflow, skips stages that
@@ -12,6 +19,24 @@ const WS_UNKNOWN_RUN = 4004;
 
 // status: connecting → streaming → done | failed, or unknown-run / lost.
 const IN_FLIGHT = new Set(["connecting", "streaming"]);
+
+/** The four phases, as a checklist. The log underneath is the detail. */
+function PhaseList({ phases }) {
+  return (
+    <ol className="phase-list">
+      {phases.map((phase) => (
+        <li key={phase.id} className={`phase phase-${phase.state}`}>
+          <span className="phase-mark">
+            {phase.state === "done" && "✓"}
+            {phase.state === "failed" && "✕"}
+            {phase.state === "active" && <span className="phase-spin" />}
+          </span>
+          <span className="phase-label">{phase.label}</span>
+        </li>
+      ))}
+    </ol>
+  );
+}
 
 function LogRow({ event, state, t0 }) {
   const [open, setOpen] = useState(false);
@@ -35,57 +60,143 @@ function LogRow({ event, state, t0 }) {
   );
 }
 
-function ManifestList({ manifests, error, onPick }) {
+/**
+ * One comparison, told as a change rather than as a file.
+ *
+ * The walkthrough is the offer: it needs nothing installed and always
+ * finishes, so it is the only primary action here. Running the same
+ * comparison for real is a demoted second option, because it needs a Docker
+ * daemon and most visitors don't have one. Manifest paths are deliberately
+ * absent — they identify the file to the operator, not the change to the
+ * visitor. The one exception is a manifest that won't parse, where naming
+ * the file is the whole point of the message.
+ */
+function ComparisonCard({ manifest, selected, canRunReal, onRun }) {
+  const scenario = scenarioForManifest(manifest.filename);
+  const broken = Boolean(manifest.error);
+  const runnable = canRunReal && !broken;
+
+  return (
+    <div className={`comparison-card ${selected ? "selected" : ""}`}>
+      <div className="comparison-main">
+        <div className="comparison-title-row">
+          {scenario && <span className="pr-badge">{scenario.pr}</span>}
+          <span className="comparison-name">
+            {scenario ? scenario.title : manifest.app_name || manifest.filename}
+          </span>
+          {broken && <span className="badge badge-red">unparseable</span>}
+        </div>
+
+        <p className="comparison-claim">
+          {scenario
+            ? scenario.subtitle
+            : "No walkthrough for this comparison — it can be run, but nothing here can narrate it."}
+        </p>
+
+        <div className="comparison-meta">
+          {scenario && <div className="scenario-watch">{watchLine(scenario)}</div>}
+          {!broken && !scenario && (
+            <div className="comparison-dim">
+              {manifest.workflow_count} workflow{manifest.workflow_count === 1 ? "" : "s"}
+            </div>
+          )}
+        </div>
+
+        {broken && (
+          <div className="manifest-err">
+            {manifest.filename}: {manifest.error}
+          </div>
+        )}
+        {selected && (
+          <div className="comparison-note">Picked for you · start it whenever you're ready</div>
+        )}
+      </div>
+
+      <div className="comparison-actions">
+        {scenario ? (
+          <>
+            <Link to={`/demo/${scenario.id}`} className="btn-pri act-link">
+              Watch it happen
+            </Link>
+            {runnable && (
+              <div className="run-real-wrap">
+                <button className="run-real" onClick={() => onRun(manifest)}>
+                  Run it for real
+                </button>
+                <div className="run-real-note">Docker required</div>
+              </div>
+            )}
+          </>
+        ) : runnable ? (
+          <button className="btn-sec" onClick={() => onRun(manifest)}>
+            Run it for real
+          </button>
+        ) : (
+          // No walkthrough and nothing to run it with: say so rather than
+          // leaving a card with no action and no explanation.
+          <div className="run-real-note">{broken ? "Not runnable" : "Needs Docker"}</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ComparisonPicker({ manifests, error, selectedManifest, canRunReal, onRun }) {
+  // Whatever goes wrong with the server, the walkthrough is unaffected —
+  // it is bundled with the page. Every dead end offers it.
+  const scriptedEscape = (
+    <Link to="/demo/checkout-validation" className="btn-sec act-link">
+      Watch a comparison instead
+    </Link>
+  );
+
   if (error) {
     return (
-      <div className="alert alert-err">
-        <span className="alert-icon">⚠</span>
-        <div>
-          <div className="alert-title">Could not load manifests</div>
-          <div className="alert-detail">{error}</div>
-        </div>
-      </div>
+      <StateNotice variant="error" title="Could not reach the run server" detail={error}>
+        {scriptedEscape}
+      </StateNotice>
     );
   }
 
   if (manifests === null) {
-    return <p style={{ color: "var(--text-3)", padding: "40px 0" }}>Loading manifests…</p>;
+    return <StateNotice variant="loading" title="Loading comparisons…" />;
   }
 
   if (manifests.length === 0) {
     return (
-      <div className="empty-state">
-        <div className="empty-icon">◇</div>
-        <p className="empty-title">No manifests found</p>
-        <p className="empty-hint">
-          Drop a manifest into <code>demo/manifests/</code>, or point the server at another
-          directory with <code>BEHAVIORDIFF_MANIFEST_DIR</code>.
-        </p>
-      </div>
+      <StateNotice
+        variant="empty"
+        title="No comparisons configured"
+        detail={
+          <>
+            Drop a manifest into <code>demo/manifests/</code>, or point the server at
+            another directory with <code>BEHAVIORDIFF_MANIFEST_DIR</code>.
+          </>
+        }
+      >
+        {scriptedEscape}
+      </StateNotice>
     );
   }
 
   return (
     <>
-      <div className="sec-label">Manifests</div>
+      {/* Honesty, kept quiet: a walkthrough is a recorded run, not a
+          simulation, and it is the path this page is built around. */}
+      <div className="picker-note">
+        A walkthrough replays a recorded run — real findings, real evidence.
+        {canRunReal && " Running one live needs Docker and takes about a minute."}
+      </div>
+
+      <div className="sec-label">Comparisons</div>
       {manifests.map((m) => (
-        <div key={m.path} className="manifest-card" onClick={() => onPick(m)}>
-          <div className="manifest-left">
-            <div className="manifest-title-row">
-              <span className="manifest-app">{m.app_name || m.filename}</span>
-              {m.error ? (
-                <span className="badge badge-red">unparseable</span>
-              ) : (
-                <span className="badge badge-muted">
-                  {m.workflow_count} workflow{m.workflow_count === 1 ? "" : "s"}
-                </span>
-              )}
-            </div>
-            <div className="manifest-path">{m.path}</div>
-            {m.error && <div className="manifest-err">{m.error}</div>}
-          </div>
-          <span className="manifest-go">run →</span>
-        </div>
+        <ComparisonCard
+          key={m.path}
+          manifest={m}
+          selected={selectedManifest != null && m.filename === selectedManifest}
+          canRunReal={canRunReal}
+          onRun={onRun}
+        />
       ))}
     </>
   );
@@ -93,10 +204,19 @@ function ManifestList({ manifests, error, onPick }) {
 
 export default function RunNew() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
   const [manifests, setManifests] = useState(null);
   const [listError, setListError] = useState(null);
   const [run, setRun] = useState(null);
+  // The manifest picked but not yet started. A real run takes the better part
+  // of a minute and opens on a progress list; this holds the orientation beat
+  // in front of it so the wait means something. Nothing is POSTed until the
+  // viewer asks for it from there.
+  const [orienting, setOrienting] = useState(null);
+  // Bumped when a run fails in a way that says the daemon is down, purely so
+  // this component re-reads realRunsAvailable() and re-offers the scripted path.
+  const [, setModeRevision] = useState(0);
 
   const socketRef = useRef(null);
   // Set when a done/error frame arrives, so onclose can tell "the run ended"
@@ -156,6 +276,15 @@ export default function RunNew() {
         ws.close();
       }
 
+      // Outside the state updater: updaters must stay pure under StrictMode.
+      if (event.stage === "error") {
+        const daemonDown = noteRunFailure({
+          errorType: event.data?.error_type,
+          message: event.data?.error || event.message,
+        });
+        if (daemonDown) setModeRevision((n) => n + 1);
+      }
+
       setRun((r) => {
         if (!r) return r;
         const events = [...r.events, event];
@@ -198,6 +327,7 @@ export default function RunNew() {
     const attempt = ++attemptRef.current;
     closeSocket();
     terminalRef.current = false;
+    setOrienting(null);
     setRun({
       manifest,
       streamId: null,
@@ -224,6 +354,7 @@ export default function RunNew() {
     closeSocket();
     terminalRef.current = false;
     setRun(null);
+    setOrienting(null);
   }
 
   // Follow the tail of the log as frames arrive.
@@ -231,20 +362,65 @@ export default function RunNew() {
     if (run?.events.length) bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [run?.events.length]);
 
-  if (!run) {
+  const canRunReal = realRunsAvailable();
+
+  // Picked, not yet started: the same beat the demo flow opens on, so both
+  // paths explain themselves the same way before anything starts moving.
+  if (!run && orienting) {
+    const scenario = scenarioForManifest(orienting.filename);
     return (
-      <div style={{ paddingTop: "24px" }}>
-        <Link to="/runs" className="back-link">← All runs</Link>
-        <div className="pr-header">
-          <div className="pr-row">
-            <span className="pr-title">Run a comparison</span>
+      <div className="demo-page">
+        <DemoBackground diverged={false} />
+        <button className="back-link stream-back" onClick={() => setOrienting(null)}>
+          ← Back to scenarios
+        </button>
+
+        <OrientationPanel
+          onContinue={() => start(orienting)}
+          continueLabel="Start the run →"
+        />
+
+        <p className="orient-foot">
+          {scenario ? `Up next: ${scenario.title}. ` : ""}
+          Both versions get built and started, so this takes about a minute.
+        </p>
+      </div>
+    );
+  }
+
+  if (!run) {
+    // Derived at render, never in an effect: the param is inert if the
+    // manifest list fails to load, and it survives StrictMode's double pass.
+    const preselected = searchParams.get("manifest");
+
+    return (
+      <div className="demo-page">
+        <DemoBackground diverged={false} />
+        <Link to="/" className="back-link">← Home</Link>
+
+        <div className="demo-pane">
+          <div className="pr-header">
+            <div className="pr-row">
+              <span className="pr-title">Pick a comparison</span>
+            </div>
+            <div className="pr-intent">
+              Every one of these passed review and shipped green. Pick one and
+              watch what it actually did.
+            </div>
           </div>
-          <div className="pr-intent">
-            Pick a manifest. Both versions are built and started, the workflows run against
-            each, and the observations are compared.
+
+          <ComparisonPicker
+            manifests={manifests}
+            error={listError}
+            selectedManifest={preselected}
+            canRunReal={canRunReal}
+            onRun={setOrienting}
+          />
+
+          <div className="picker-foot">
+            <Link to="/runs" className="back-link">All previous runs →</Link>
           </div>
         </div>
-        <ManifestList manifests={manifests} error={listError} onPick={start} />
       </div>
     );
   }
@@ -252,123 +428,140 @@ export default function RunNew() {
   const { status, events, manifest } = run;
   const t0 = events.length ? events[0].timestamp : null;
   const live = IN_FLIGHT.has(status);
+  const diverged = hasDiverged(events);
+  const scenario = scenarioForManifest(manifest.filename);
+  const phases = phaseStates(events, { live });
+
+  const statusLine =
+    (status === "connecting" && "Starting…") ||
+    (status === "streaming" && "Running") ||
+    (status === "done" && "Run complete") ||
+    (status === "failed" && "Run failed") ||
+    (status === "unknown-run" && "Run not found") ||
+    (status === "lost" && "Stream disconnected");
 
   return (
-    <div style={{ paddingTop: "24px" }}>
-      <button className="back-link stream-back" onClick={backToList}>← Manifests</button>
+    <div className="demo-page">
+      <DemoBackground diverged={diverged} />
+      <button className="back-link stream-back" onClick={backToList}>← Back to scenarios</button>
 
-      <div className="pr-header">
-        <div className="pr-row">
-          <span className="pr-badge">{manifest.app_name || manifest.filename}</span>
-          <span className="pr-title">
-            {status === "connecting" && "Starting…"}
-            {status === "streaming" && "Running"}
-            {status === "done" && "Run complete"}
-            {status === "failed" && "Run failed"}
-            {status === "unknown-run" && "Run not found"}
-            {status === "lost" && "Stream disconnected"}
-          </span>
-          {live && <span className="stream-pulse" />}
+      <div className="demo-pane">
+        <div className="pr-header">
+          <div className="pr-row">
+            {/* The change being compared, not the file it is configured in. */}
+            <span className="pr-badge">{scenario ? scenario.pr : manifest.app_name || manifest.filename}</span>
+            <span className="pr-title">{scenario ? scenario.title : statusLine}</span>
+            {live && <span className="stream-pulse" />}
+          </div>
+          <div className="pr-intent">
+            {scenario ? `${scenario.subtitle} · ${statusLine}` : statusLine}
+          </div>
         </div>
-        <div className="pr-intent">{manifest.path}</div>
-      </div>
 
-      <div className="stream-log-wrap">
-        <ol className="log">
-          {events.map((event, i) => {
-            const last = i === events.length - 1;
-            let state = "done";
-            if (event.stage === "error") state = "err";
-            else if (last && live) state = "active";
-            return <LogRow key={i} event={event} state={state} t0={t0} />;
-          })}
-          {live && (
-            <li className="log-row">
-              <div className="log-line">
-                <span className="log-dot log-dot-pending" />
-                <span className="log-time" />
-                <span className="log-msg log-waiting">
-                  {status === "connecting" ? "connecting to the run stream…" : "waiting for the next stage…"}
-                </span>
+        <PhaseList phases={phases} />
+
+        <details className="raw-log">
+          <summary className="raw-log-toggle">
+            Raw log <span className="raw-log-count">{events.length}</span>
+          </summary>
+          <div className="stream-log-wrap">
+            <ol className="log">
+              {events.map((event, i) => {
+                const last = i === events.length - 1;
+                let state = "done";
+                if (event.stage === "error") state = "err";
+                else if (last && live) state = "active";
+                return <LogRow key={i} event={event} state={state} t0={t0} />;
+              })}
+              {live && (
+                <li className="log-row">
+                  <div className="log-line">
+                    <span className="log-dot log-dot-pending" />
+                    <span className="log-time" />
+                    <span className="log-msg log-waiting">
+                      {status === "connecting" ? "connecting to the run stream…" : "waiting for the next stage…"}
+                    </span>
+                  </div>
+                </li>
+              )}
+              <li ref={bottomRef} />
+            </ol>
+          </div>
+        </details>
+
+        {status === "failed" && (
+          <div className="alert alert-err">
+            <span className="alert-icon">⚠</span>
+            <div>
+              <div className="alert-title">
+                The run failed{run.errorType ? ` · ${run.errorType}` : ""}
               </div>
-            </li>
-          )}
-          <li ref={bottomRef} />
-        </ol>
-      </div>
-
-      {status === "failed" && (
-        <div className="alert alert-err">
-          <span className="alert-icon">⚠</span>
-          <div>
-            <div className="alert-title">
-              The run failed{run.errorType ? ` · ${run.errorType}` : ""}
-            </div>
-            <div className="alert-detail">{run.error}</div>
-          </div>
-        </div>
-      )}
-
-      {status === "unknown-run" && (
-        <div className="alert alert-err">
-          <span className="alert-icon">⚠</span>
-          <div>
-            <div className="alert-title">This run could not be found</div>
-            <div className="alert-detail">
-              The server has no run with id <code>{run.streamId}</code>. It may have been evicted,
-              or the server restarted after it was started.
+              <div className="alert-detail">{run.error}</div>
             </div>
           </div>
-        </div>
-      )}
-
-      {status === "lost" && (
-        <div className="alert alert-warn">
-          <span className="alert-icon">◌</span>
-          <div>
-            <div className="alert-title">The event stream disconnected</div>
-            <div className="alert-detail">
-              The run may still be going on the server. Reconnecting picks up new events —
-              anything emitted while disconnected is not replayed.
-            </div>
-          </div>
-        </div>
-      )}
-
-      <div className="stream-actions">
-        {status === "done" && (
-          <button
-            className="btn-pri"
-            disabled={!run.resultRunId}
-            onClick={() => navigate(`/runs/${run.resultRunId}`)}
-          >
-            View full results
-          </button>
         )}
+
+        {status === "unknown-run" && (
+          <div className="alert alert-err">
+            <span className="alert-icon">⚠</span>
+            <div>
+              <div className="alert-title">This run could not be found</div>
+              <div className="alert-detail">
+                The server has no run with id <code>{run.streamId}</code>. It may have been evicted,
+                or the server restarted after it was started.
+              </div>
+            </div>
+          </div>
+        )}
+
         {status === "lost" && (
-          <button
-            className="btn-sec"
-            onClick={() => {
-              setRun((r) => (r ? { ...r, status: "connecting" } : r));
-              openStream(run.streamId);
-            }}
-          >
-            Reconnect
-          </button>
+          <div className="alert alert-warn">
+            <span className="alert-icon">◌</span>
+            <div>
+              <div className="alert-title">The event stream disconnected</div>
+              <div className="alert-detail">
+                The run may still be going on the server. Reconnecting picks up new events —
+                anything emitted while disconnected is not replayed.
+              </div>
+            </div>
+          </div>
         )}
-        {(status === "failed" || status === "unknown-run" || status === "lost") && (
-          <button className="btn-sec" onClick={backToList}>Try again</button>
-        )}
-        {(status === "done" || status === "lost") && (
-          <Link to="/runs" className="btn-sec stream-link-btn">All runs</Link>
+
+        <div className="stream-actions">
+          {status === "done" && (
+            <button
+              className="btn-pri"
+              disabled={!run.resultRunId}
+              onClick={() => navigate(`/runs/${run.resultRunId}`)}
+            >
+              View full results
+            </button>
+          )}
+          {status === "lost" && (
+            <button
+              className="btn-sec"
+              onClick={() => {
+                setRun((r) => (r ? { ...r, status: "connecting" } : r));
+                openStream(run.streamId);
+              }}
+            >
+              Reconnect
+            </button>
+          )}
+          {(status === "failed" || status === "unknown-run" || status === "lost") && (
+            <button className="btn-sec" onClick={backToList}>Try again</button>
+          )}
+          {(status === "done" || status === "lost") && (
+            <Link to="/runs" className="btn-sec stream-link-btn">All runs</Link>
+          )}
+        </div>
+
+        {status === "done" && !run.resultRunId && (
+          <p className="stream-note">
+            The run finished but reported no persisted run id, so there is nothing to open.
+          </p>
         )}
       </div>
-
-      {status === "done" && !run.resultRunId && (
-        <p className="stream-note">
-          The run finished but reported no persisted run id, so there is nothing to open.
-        </p>
-      )}
     </div>
   );
 }

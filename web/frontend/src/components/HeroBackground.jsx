@@ -1,3 +1,5 @@
+import Grain from "./Grain";
+
 export default function HeroBackground() {
   return (
     <div className="herobg" aria-hidden="true">
@@ -44,18 +46,7 @@ export default function HeroBackground() {
       <span className="side-label side-label-base">base</span>
       <span className="side-label side-label-target">target</span>
 
-      <svg className="grain-fine">
-        <filter id="grainFine">
-          <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="4" />
-        </filter>
-        <rect width="100%" height="100%" filter="url(#grainFine)" />
-      </svg>
-      <svg className="grain-coarse">
-        <filter id="grainCoarse">
-          <feTurbulence type="fractalNoise" baseFrequency="0.35" numOctaves="2" />
-        </filter>
-        <rect width="100%" height="100%" filter="url(#grainCoarse)" />
-      </svg>
+      <Grain />
     </div>
   );
 }
