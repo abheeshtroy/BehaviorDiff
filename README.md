@@ -83,15 +83,40 @@ python cli.py --init ./your-app --base-ref main --target-ref your-branch
 
 It scans the repo, reads the route handlers, and writes a `behaviordiff.yaml` with workflows that match the actual request schemas.
 
-### 2. Start both versions
+### 2. Build the demo repository
+
+```bash
+python demo/build_demo_repo.py
+```
+
+The engine compares two git refs, so the demo needs a repository with real
+history. This generates one in `demo/.demo-repo` (gitignored): `main` is
+`demo/shop-api`, and each scenario branch applies one overlay from
+`demo/variants/` on top of it, so `git diff main..fix/checkout-validation` is
+exactly the change a reviewer would see. Re-run it after editing either.
+
+That's all the setup a full run needs — the engine builds an image per ref,
+starts a Postgres per version, and tears it all down afterwards:
+
+```bash
+python cli.py demo/manifests/scenario1-checkout-validation.yaml
+```
+
+Or trigger it from the dashboard at `/runs/new` and watch the events stream in.
+
+### 3. Or run against already-started versions
+
+To skip orchestration and compare two containers you started yourself:
 
 ```bash
 cd demo && docker compose up -d
 ```
 
-The demo ships with a `docker-compose.yaml` that runs base (port 8001), target (port 8002), separate Postgres instances (ports 55432, 55433), and a payment mock.
-
-### 3. Run the comparison
+`docker-compose.yaml` runs base (port 8001), target (port 8002), separate
+Postgres instances (ports 55432, 55433), and a payment mock. `base` builds from
+`demo/shop-api`; `target` builds from `demo/.demo-build/fix-checkout-validation`,
+which step 2 also materializes — point it at another `.demo-build/fix-*`
+directory to compare a different scenario. Then:
 
 ```bash
 python cli.py demo/manifests/scenario1-checkout-validation.yaml \
@@ -118,13 +143,19 @@ Each finding gets labeled `[intended]`, `[suspicious]`, or `[noise]` with reason
 
 ## Demo scenarios
 
-The repo ships with three seeded scenarios against a FastAPI shop API, each with a planted bug:
+The repo ships with three seeded scenarios against a FastAPI shop API, each with a planted bug. Every scenario is one branch of the generated demo repository, changing exactly one module:
 
-| Scenario | Change | Intended | Seeded bugs |
+| Scenario | Branch changes | Intended | Seeded bugs |
 |---|---|---|---|
-| checkout-validation | Return 400 instead of 500 on bad address | Status code change | Payment called before validation; discount cleared on rollback |
-| retry-logic | Refactor fulfillment retry | Job scheduling | Duplicate background jobs created |
-| response-cleanup | Rename `total` → `amount`, change type | Field rename | Breaks downstream consumers expecting `total` as string |
+| checkout-validation | `app/checkout.py` | 400 instead of 500 on a bad address | Payment authorized before validation; discount cleared on rejection |
+| retry-logic | `app/fulfillment.py` | Retry queueing the fulfill job | Duplicate background jobs created |
+| response-cleanup | `app/orders.py` | Rename `total` → `amount`, change type | Breaks consumers expecting `total` as a string |
+
+The app records every payment authorization in `payment_calls`, which
+scenario 1 observes — that's how "it charged the customer before rejecting the
+address" becomes visible to a database observer. Outbound HTTP interception is
+not wired into the run path yet (see Roadmap), so the payment provider is
+stubbed in-process when `PAYMENT_URL` is unset, which is how the engine runs it.
 
 ## Key design decisions
 

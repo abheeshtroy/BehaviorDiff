@@ -12,6 +12,15 @@ CREATE TABLE IF NOT EXISTS orders (
     status TEXT NOT NULL
 );
 
+-- Every authorization the app attempts, so an authorization that should never
+-- have happened is visible to anything observing this database.
+CREATE TABLE IF NOT EXISTS payment_calls (
+    id TEXT PRIMARY KEY,
+    cart_id TEXT REFERENCES carts(id),
+    amount INTEGER NOT NULL,
+    status TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS jobs (
     id TEXT PRIMARY KEY,
     order_id TEXT REFERENCES orders(id),

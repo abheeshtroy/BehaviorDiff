@@ -346,3 +346,58 @@ class TestFileLoading:
 
         with pytest.raises(ManifestError, match="YAML"):
             load_manifest(bad)
+
+
+class TestPathAnchoring:
+    """Relative paths in a manifest are relative to the manifest, not the cwd."""
+
+    def _written(self, tmp_path: Path, repo: str) -> Path:
+        import yaml
+
+        manifest_dir = tmp_path / "manifests"
+        manifest_dir.mkdir()
+        data = _valid_manifest_dict()
+        data["compare"]["repo"] = repo
+        path = manifest_dir / "scenario.yaml"
+        path.write_text(yaml.safe_dump(data))
+        return path
+
+    def test_loaded_manifest_remembers_where_it_came_from(self, tmp_path: Path) -> None:
+        path = self._written(tmp_path, ".")
+
+        manifest = load_manifest(path)
+
+        assert manifest.source_path == path.resolve()
+        assert manifest.base_dir == path.parent.resolve()
+
+    def test_app_dir_is_the_repo_relative_to_the_manifest(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        path = self._written(tmp_path, "../shop-api")
+        monkeypatch.chdir(tmp_path)
+
+        manifest = load_manifest(path)
+
+        assert manifest.app_dir == (tmp_path / "shop-api").resolve()
+        assert manifest.seed_path == (tmp_path / "shop-api" / "seed.sql").resolve()
+
+    def test_remote_repo_falls_back_to_the_manifest_directory(self, tmp_path: Path) -> None:
+        path = self._written(tmp_path, "https://github.com/example/shop-api.git")
+
+        manifest = load_manifest(path)
+
+        assert manifest.app_dir == path.parent.resolve()
+        assert manifest.seed_path == (path.parent / "seed.sql").resolve()
+
+    def test_source_path_is_not_part_of_the_manifest_schema(self) -> None:
+        data = _valid_manifest_dict()
+        data["source_path"] = "/somewhere/else/manifest.yaml"
+
+        with pytest.raises(ManifestError, match="source_path"):
+            parse_manifest(data)
+
+    def test_dict_manifest_has_no_source_and_dumps_unchanged(self) -> None:
+        manifest = parse_manifest(_valid_manifest_dict())
+
+        assert manifest.source_path is None
+        assert "source_path" not in manifest.model_dump()

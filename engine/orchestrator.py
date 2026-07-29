@@ -234,9 +234,16 @@ class Orchestrator:
 
     def _seed_postgres(self, label: str) -> None:
         assert self.manifest.database is not None
-        seed_path = Path(self.manifest.database.seed)
+        # Resolved against the app directory, not the cwd: the seed sits with the
+        # app it seeds, and where the engine was invoked from says nothing about
+        # where that is.
+        seed_path = self.manifest.seed_path
+        assert seed_path is not None  # guaranteed by manifest.database above
         if not seed_path.is_file():
-            raise OrchestratorError(f"seed file not found: {seed_path}")
+            raise OrchestratorError(
+                f"seed file not found: {seed_path} "
+                f"(database.seed {self.manifest.database.seed!r} resolved against {self.manifest.app_dir})"
+            )
 
         _container, host_port = self._postgres_handles(label)
         sql = seed_path.read_text()
@@ -310,10 +317,15 @@ class Orchestrator:
         self._run_git(["git", "checkout", "--quiet", ref], cwd=dest)
 
     def _repo_source(self) -> str:
+        """Where to clone the two versions from: a remote URL, or a local directory.
+
+        A local path is anchored the same way the seed file is, so the checkout
+        and the seed can never disagree about which directory the app lives in.
+        """
         repo = self.manifest.compare.repo
         if "://" in repo or repo.startswith("git@"):
             return repo
-        return str(Path(repo).resolve())
+        return str(self.manifest.app_dir)
 
     def _run_git(self, args: list[str], cwd: Path | None = None) -> None:
         try:

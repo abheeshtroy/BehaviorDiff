@@ -66,6 +66,15 @@ def _matches_any(path: str, patterns: list[str]) -> bool:
     return False
 
 
+def is_ignored_field(path: str, config: NormalizeConfig) -> bool:
+    """True when a field path is covered by the config's ignore_fields patterns.
+
+    For callers comparing values the Normalizer never walks — response headers,
+    say — so that one manifest's ignore rules mean the same thing everywhere.
+    """
+    return _matches_any(path, config.ignore_fields)
+
+
 def _decimal_places(tolerance: float) -> int:
     """Number of decimal places implied by a numeric_tolerance value, e.g. 0.001 -> 3.
 

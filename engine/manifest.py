@@ -11,7 +11,16 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, StrictFloat, StrictInt, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PrivateAttr,
+    StrictFloat,
+    StrictInt,
+    field_validator,
+    model_validator,
+)
 
 _HTTP_METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"}
 
@@ -177,6 +186,11 @@ class Manifest(StrictModel):
     workflows: list[Workflow] = Field(min_length=1)
     normalize: NormalizeConfig = Field(default_factory=NormalizeConfig)
 
+    # Where this manifest was read from, when it came from a file. Private so
+    # it stays out of the YAML surface (a `source_path:` key in a manifest is
+    # still an unknown field) and out of model_dump.
+    _source_path: Path | None = PrivateAttr(default=None)
+
     @model_validator(mode="after")
     def workflow_names_are_unique(self) -> "Manifest":
         seen: set[str] = set()
@@ -185,6 +199,55 @@ class Manifest(StrictModel):
                 raise ValueError(f"duplicate workflow name: {workflow.name!r}")
             seen.add(workflow.name)
         return self
+
+    @property
+    def source_path(self) -> Path | None:
+        """The file this manifest was loaded from, or None if parsed from a dict."""
+        return self._source_path
+
+    @property
+    def base_dir(self) -> Path:
+        """Anchor for the relative paths written inside this manifest.
+
+        A path in a manifest describes where something sits relative to the
+        manifest, not relative to whoever invoked the engine — otherwise a run
+        succeeds or fails based on the caller's working directory. A manifest
+        parsed from a dict has no location to anchor to, so it falls back to the
+        cwd, which is all it ever had.
+        """
+        return self._source_path.parent if self._source_path is not None else Path.cwd()
+
+    @property
+    def app_dir(self) -> Path:
+        """The directory holding the app's own files: its Dockerfile, its seed SQL.
+
+        That is compare.repo, which is where app.dockerfile is resolved from
+        (inside a checkout of it). A remote repo URL has no local directory, so
+        the manifest's own directory is the only anchor available.
+        """
+        repo = self.compare.repo
+        if _is_remote_repo(repo):
+            return self.base_dir
+        return (self.base_dir / repo).resolve()
+
+    @property
+    def seed_path(self) -> Path | None:
+        """Absolute path to the database seed file, or None without a database.
+
+        The seed belongs to the app it seeds and lives with it, alongside the
+        Dockerfile — so it resolves against the app directory the same way
+        app.dockerfile does.
+        """
+        if self.database is None:
+            return None
+        seed = Path(self.database.seed)
+        return seed if seed.is_absolute() else (self.app_dir / seed).resolve()
+
+
+def _is_remote_repo(repo: str) -> bool:
+    """True when compare.repo names a remote git URL rather than a local path."""
+    return "://" in repo or repo.startswith("git@")
+
 
 def _format_validation_error(exc: Exception, source: str) -> str:
     from pydantic import ValidationError
@@ -199,8 +262,16 @@ def _format_validation_error(exc: Exception, source: str) -> str:
     return "\n".join(lines)
 
 
-def parse_manifest(data: dict[str, Any], source: str = "<manifest>") -> Manifest:
+def parse_manifest(
+    data: dict[str, Any],
+    source: str = "<manifest>",
+    *,
+    source_path: str | Path | None = None,
+) -> Manifest:
     """Validate an already-parsed manifest dict into a Manifest model.
+
+    source_path is the file the dict was read from, when there is one; it is
+    what the manifest's relative paths are then anchored to.
 
     Raises ManifestError with a human-readable, field-level message on
     any missing/extra/malformed field.
@@ -210,9 +281,13 @@ def parse_manifest(data: dict[str, Any], source: str = "<manifest>") -> Manifest
             f"{source}: expected a YAML mapping at the top level, got {type(data).__name__}"
         )
     try:
-        return Manifest.model_validate(data)
+        manifest = Manifest.model_validate(data)
     except Exception as exc:  # pydantic.ValidationError
         raise ManifestError(_format_validation_error(exc, source)) from exc
+
+    if source_path is not None:
+        manifest._source_path = Path(source_path).resolve()
+    return manifest
 
 
 def load_manifest(path: str | Path) -> Manifest:
@@ -234,4 +309,4 @@ def load_manifest(path: str | Path) -> Manifest:
     if data is None:
         raise ManifestError(f"{manifest_path}: manifest file is empty")
 
-    return parse_manifest(data, source=str(manifest_path))
+    return parse_manifest(data, source=str(manifest_path), source_path=manifest_path)

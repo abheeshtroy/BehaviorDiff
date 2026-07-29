@@ -5,7 +5,9 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
-      "/api": "http://localhost:8100",
+      // ws: the run stream is a WebSocket under /api, and vite only proxies
+      // the upgrade request when told to.
+      "/api": { target: "http://localhost:8100", ws: true },
     },
   },
 });

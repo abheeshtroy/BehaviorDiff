@@ -22,13 +22,19 @@ export default function RunList() {
         <div className="empty-icon">◇</div>
         <p className="empty-title">No runs yet</p>
         <p className="empty-hint">Run <code>behaviordiff manifest.yaml</code> to see results here</p>
+        <div style={{ marginTop: "20px" }}>
+          <Link to="/runs/new" className="btn-sec stream-link-btn">Run a comparison</Link>
+        </div>
       </div>
     );
   }
 
   return (
     <div style={{ paddingTop: "32px" }}>
-      <div className="sec-label">Recent runs</div>
+      <div className="list-head">
+        <div className="sec-label" style={{ marginBottom: 0 }}>Recent runs</div>
+        <Link to="/runs/new" className="btn-sec stream-link-btn">Run a comparison</Link>
+      </div>
       {runs.map((run) => (
         <Link key={run.id} to={`/runs/${run.id}`} className="run-card">
           <div className="run-left">

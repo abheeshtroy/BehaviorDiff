@@ -14,7 +14,7 @@ database:
 compare:
   base_ref: main
   target_ref: fix/response-cleanup
-  repo: demo/shop-api
+  repo: ../.demo-repo  # relative to this manifest; built by demo/build_demo_repo.py
 
 workflows:
   - name: create-order-then-read
@@ -31,6 +31,8 @@ workflows:
         path: /api/orders/{order_id}
 
 normalize:
+  ignore_fields:
+    - "headers.date"      # response clock, not behaviour
   uuid_fields:
     - "*.cart_id"
     - "*.order_id"

@@ -5,7 +5,8 @@ of observation; this module doesn't re-derive those diffs. Its job is to
 turn each observer's diff output into Finding objects with consistent
 shape, applying the normalizer to HTTP bodies and Postgres row values along
 the way so that noise (ignored fields, UUIDs, floating-point jitter) doesn't
-surface as a finding.
+surface as a finding. Response headers aren't walked by the normalizer, but the
+manifest's ignore_fields still applies to them under the path "headers.<name>".
 
 Base and target are normalized independently (a fresh Normalizer per side),
 the same pattern normalizer.detect_instability uses for repeated runs of one
@@ -22,7 +23,7 @@ import structlog
 from pydantic import BaseModel, Field
 
 from engine.manifest import NormalizeConfig
-from engine.normalizer import Normalizer
+from engine.normalizer import Normalizer, is_ignored_field
 from engine.observers.http import HttpDiff
 from engine.observers.postgres import PostgresDiff, RowChange
 from engine.observers.proxy import OutboundCall, OutboundCallDiff
@@ -86,7 +87,16 @@ def _compare_http(diff: HttpDiff, config: NormalizeConfig) -> Finding | None:
     normalized_target_body = _normalize_independently(diff.target.body, config)
     body_changed = normalized_base_body != normalized_target_body
 
-    if not (diff.status_changed or body_changed or diff.headers_changed):
+    # A header is a field like any other, so the manifest's ignore rules apply
+    # to it under the path "headers.<name>". Without this, a volatile header
+    # (Date being the obvious one) reports a finding whenever two responses
+    # land either side of a second boundary — a difference in the clock, not
+    # in the behaviour.
+    changed_headers = [
+        name for name in diff.changed_headers if not is_ignored_field(f"headers.{name}", config)
+    ]
+
+    if not (diff.status_changed or body_changed or changed_headers):
         return None
 
     parts: list[str] = []
@@ -94,8 +104,8 @@ def _compare_http(diff: HttpDiff, config: NormalizeConfig) -> Finding | None:
         parts.append(f"status {diff.base.status_code} -> {diff.target.status_code}")
     if body_changed:
         parts.append("body changed")
-    if diff.headers_changed:
-        parts.append(f"headers changed: {', '.join(diff.changed_headers)}")
+    if changed_headers:
+        parts.append(f"headers changed: {', '.join(changed_headers)}")
 
     return Finding(
         category="http",

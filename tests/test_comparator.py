@@ -87,6 +87,85 @@ def test_http_status_diff_produces_finding() -> None:
     assert finding.evidence_target["status_code"] == 500
 
 
+def test_ignored_header_alone_does_not_produce_a_finding() -> None:
+    # Date moves whenever two responses land either side of a second boundary,
+    # which says nothing about behaviour.
+    workflow_result = _workflow_result(
+        "wf",
+        base=_capture(headers={"date": "Mon, 01 Jan 2035 00:00:00 GMT", "server": "uvicorn"}),
+        target=_capture(headers={"date": "Mon, 01 Jan 2035 00:00:01 GMT", "server": "uvicorn"}),
+    )
+
+    result = compare(
+        http_diffs=_http_diffs(workflow_result),
+        postgres_diff=None,
+        outbound_diff=None,
+        normalize_config=_config(ignore_fields=["headers.date"]),
+        **_metadata_kwargs(),
+    )
+
+    assert result.findings == []
+    assert result.noise_summary.http_suppressed == 1
+
+
+def test_header_not_covered_by_ignore_rules_is_still_reported() -> None:
+    workflow_result = _workflow_result(
+        "wf",
+        base=_capture(headers={"date": "Mon, 01 Jan 2035 00:00:00 GMT", "x-cache": "hit"}),
+        target=_capture(headers={"date": "Mon, 01 Jan 2035 00:00:01 GMT", "x-cache": "miss"}),
+    )
+
+    result = compare(
+        http_diffs=_http_diffs(workflow_result),
+        postgres_diff=None,
+        outbound_diff=None,
+        normalize_config=_config(ignore_fields=["headers.date"]),
+        **_metadata_kwargs(),
+    )
+
+    [finding] = result.findings
+    assert "headers changed: x-cache" in finding.summary
+    assert "date" not in finding.summary
+
+
+def test_ignored_header_does_not_hide_a_real_difference() -> None:
+    workflow_result = _workflow_result(
+        "wf",
+        base=_capture(status_code=500, headers={"date": "Mon, 01 Jan 2035 00:00:00 GMT"}),
+        target=_capture(status_code=400, headers={"date": "Mon, 01 Jan 2035 00:00:01 GMT"}),
+    )
+
+    result = compare(
+        http_diffs=_http_diffs(workflow_result),
+        postgres_diff=None,
+        outbound_diff=None,
+        normalize_config=_config(ignore_fields=["headers.date"]),
+        **_metadata_kwargs(),
+    )
+
+    [finding] = result.findings
+    assert "status 500 -> 400" in finding.summary
+    assert "headers changed" not in finding.summary
+
+
+def test_wildcard_ignore_pattern_covers_headers() -> None:
+    workflow_result = _workflow_result(
+        "wf",
+        base=_capture(headers={"date": "Mon, 01 Jan 2035 00:00:00 GMT"}),
+        target=_capture(headers={"date": "Mon, 01 Jan 2035 00:00:01 GMT"}),
+    )
+
+    result = compare(
+        http_diffs=_http_diffs(workflow_result),
+        postgres_diff=None,
+        outbound_diff=None,
+        normalize_config=_config(ignore_fields=["*.date"]),
+        **_metadata_kwargs(),
+    )
+
+    assert result.findings == []
+
+
 # -- postgres findings ---------------------------------------------------------
 
 

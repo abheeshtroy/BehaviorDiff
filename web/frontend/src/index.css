@@ -351,6 +351,96 @@ a { color: inherit; text-decoration: none; }
 /* ---- Coming soon tab ---- */
 .coming-soon { text-align: center; padding: 60px 0; color: var(--text-3); font-size: 14px; }
 
+/* ---- Trigger a run: manifest picker ---- */
+.topbar-cta {
+  font-size: 12.5px; color: var(--text-1);
+  border: 1px solid var(--border-strong); border-radius: 6px;
+  padding: 4px 12px; transition: border-color 0.15s, color 0.15s;
+}
+.topbar-cta:hover { border-color: var(--text-3); color: var(--text-0); }
+
+.list-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.stream-link-btn { display: inline-block; padding: 7px 16px; font-size: 12.5px; }
+
+.manifest-card {
+  display: flex; justify-content: space-between; align-items: center;
+  background: var(--bg-1); border: 1px solid var(--border);
+  border-radius: 12px; padding: 16px 20px; margin-bottom: 8px;
+  cursor: pointer; transition: border-color 0.15s, background 0.15s, transform 0.15s;
+}
+.manifest-card:hover { border-color: var(--border-strong); background: var(--bg-hover); transform: translateY(-1px); }
+.manifest-card:hover .manifest-go { color: var(--text-1); }
+.manifest-left { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.manifest-title-row { display: flex; align-items: center; gap: 10px; }
+.manifest-app { font-size: 15px; font-weight: 600; color: var(--text-0); }
+.manifest-path { font-family: var(--mono); font-size: 11.5px; color: var(--text-3); word-break: break-all; }
+.manifest-err { font-size: 12.5px; color: var(--red); }
+.manifest-go { font-family: var(--mono); font-size: 11px; color: var(--text-3); flex-shrink: 0; padding-left: 16px; }
+
+/* ---- Trigger a run: live event stream ---- */
+.stream-back { background: none; border: none; font-family: var(--sans); cursor: pointer; padding: 0; }
+.stream-pulse {
+  width: 6px; height: 6px; border-radius: 50%; background: var(--blue);
+  box-shadow: 0 0 0 3px var(--blue-bg);
+  animation: streamPulse 1.4s ease-in-out infinite;
+}
+@keyframes streamPulse { 50% { opacity: 0.25; } }
+
+.stream-log-wrap {
+  background: var(--bg-1); border: 1px solid var(--border);
+  border-radius: 12px; padding: 8px 4px;
+  max-height: 58vh; overflow-y: auto; margin-bottom: 12px;
+}
+.log { list-style: none; }
+.log-row { list-style: none; }
+.log-line {
+  display: grid; grid-template-columns: 8px 46px 168px 1fr auto;
+  align-items: baseline; gap: 12px;
+  padding: 6px 14px; border-radius: 6px;
+  font-family: var(--mono); font-size: 11.5px; line-height: 1.7;
+}
+.log-line-open { cursor: pointer; }
+.log-line-open:hover { background: var(--bg-2); }
+
+/* Same status vocabulary as the demo's lane blocks, shrunk to a dot. */
+.log-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--bg-3); border: 1px solid var(--border-strong);
+  align-self: center;
+}
+.log-dot-pending { background: transparent; }
+.log-dot-active {
+  background: var(--blue); border-color: var(--blue-border);
+  animation: streamPulse 1.4s ease-in-out infinite;
+}
+.log-dot-done { background: var(--green-bg); border-color: var(--green-border); }
+.log-dot-err { background: var(--red-bg); border-color: var(--red); }
+
+.log-time { color: var(--text-3); text-align: right; }
+.log-stage { color: var(--text-2); overflow-wrap: anywhere; }
+.log-msg { color: var(--text-1); overflow-wrap: anywhere; }
+.log-waiting { color: var(--text-3); grid-column: 3 / -1; }
+.log-chevron { font-size: 9px; color: var(--text-3); }
+.log-data { margin: 4px 14px 10px 78px; }
+
+/* ---- Alerts ---- */
+.alert {
+  display: flex; gap: 10px; align-items: flex-start;
+  border-radius: 12px; padding: 14px 18px; margin-bottom: 12px;
+  font-size: 13.5px;
+}
+.alert-err { background: var(--red-bg); border: 1px solid var(--red-border); }
+.alert-err .alert-icon, .alert-err .alert-title { color: var(--red); }
+.alert-warn { background: var(--amber-bg); border: 1px solid rgba(251,191,36,0.18); }
+.alert-warn .alert-icon, .alert-warn .alert-title { color: var(--amber); }
+.alert-title { font-weight: 500; margin-bottom: 3px; }
+.alert-detail { color: var(--text-2); font-size: 12.5px; line-height: 1.6; overflow-wrap: anywhere; }
+.alert-detail code { font-family: var(--mono); font-size: 11.5px; color: var(--text-1); }
+
+.stream-actions { display: flex; gap: 8px; align-items: center; margin-top: 4px; }
+.btn-pri:disabled { opacity: 0.45; cursor: not-allowed; box-shadow: none; }
+.stream-note { font-size: 12.5px; color: var(--text-3); margin-top: 10px; }
+
 /* ---- Responsive ---- */
 @media (max-width: 700px) {
   .hero h1 { font-size: 24px; }
@@ -361,6 +451,14 @@ a { color: inherit; text-decoration: none; }
   .stats-grid { grid-template-columns: repeat(2,1fr); }
   .run-card { flex-direction: column; align-items: flex-start; gap: 12px; }
   .evidence { grid-template-columns: 1fr; }
+  .manifest-card { flex-direction: column; align-items: flex-start; gap: 10px; }
+  .manifest-go { padding-left: 0; }
+  .log-line { grid-template-columns: 8px 44px 1fr auto; }
+  .log-stage { grid-column: 3; }
+  .log-msg { grid-column: 2 / -1; }
+  .log-waiting { grid-column: 2 / -1; }
+  .log-data { margin-left: 14px; }
+  .topbar-cta { display: none; }
 }
 
 

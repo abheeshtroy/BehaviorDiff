@@ -65,6 +65,12 @@ AI proposes and explains. Deterministic code verifies and decides. The engine mu
 
 ## Manifest format
 
+Relative paths in a manifest are resolved against the manifest's own location,
+never the caller's cwd — a run must behave the same from any directory.
+`compare.repo` is relative to the manifest file's directory; `database.seed` and
+`app.dockerfile` are relative to the app directory that `compare.repo` names.
+(`Manifest.base_dir` / `.app_dir` / `.seed_path` in engine/manifest.py.)
+
 ```yaml
 app:
   name: my-app

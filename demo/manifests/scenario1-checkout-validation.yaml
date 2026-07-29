@@ -11,6 +11,7 @@ database:
   observe_tables:
     - carts
     - orders
+    - payment_calls
 
 outbound:
   services:
@@ -24,7 +25,7 @@ outbound:
 compare:
   base_ref: main
   target_ref: fix/checkout-validation
-  repo: demo/shop-api
+  repo: ../.demo-repo  # relative to this manifest; built by demo/build_demo_repo.py
 
 workflows:
   - name: checkout-with-discount-and-invalid-address
@@ -44,6 +45,7 @@ normalize:
   ignore_fields:
     - "*.created_at"
     - "*.updated_at"
+    - "headers.date"      # response clock, not behaviour
   uuid_fields:
     - "*.cart_id"
     - "*.order_id"

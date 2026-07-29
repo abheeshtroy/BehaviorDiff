@@ -35,12 +35,14 @@ services:
       timeout: 3s
       retries: 10
 
+  # base is this tree; target is one scenario branch of it, materialized by
+  # `python demo/build_demo_repo.py`. Point target's build at another
+  # .demo-build/fix-* directory to compare a different scenario.
   base:
     build: ./shop-api
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres-base:5432/shop
       PAYMENT_URL: http://payment-mock:9090
-      VARIANT: main
     ports:
       - "8001:8000"
     depends_on:
@@ -48,11 +50,10 @@ services:
         condition: service_healthy
 
   target:
-    build: ./shop-api
+    build: ./.demo-build/fix-checkout-validation
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres-target:5432/shop
       PAYMENT_URL: http://payment-mock:9090
-      VARIANT: fix/checkout-validation
     ports:
       - "8002:8000"
     depends_on:

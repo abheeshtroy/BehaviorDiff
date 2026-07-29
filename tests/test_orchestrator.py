@@ -5,15 +5,17 @@ and httpx so no Docker daemon or real network access is required.
 from __future__ import annotations
 
 import subprocess
+from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
 import docker.errors
 import psycopg
 import pytest
+import yaml
 
 from engine import orchestrator as orch_module
-from engine.manifest import Manifest, parse_manifest
+from engine.manifest import Manifest, load_manifest, parse_manifest
 from engine.orchestrator import Orchestrator, OrchestratorError, RunHandles
 
 
@@ -299,6 +301,138 @@ class TestFailureModes:
 
         with pytest.raises(OrchestratorError, match="no published host port"):
             orch.start()
+
+
+class TestSeedResolution:
+    """database.seed resolves against the app directory, never the caller's cwd.
+
+    The regression: seed was read as Path(manifest.database.seed), so a manifest
+    saying `seed: seed.sql` only worked when the engine happened to be invoked
+    from the one directory holding that file. Every run from anywhere else died
+    with "seed file not found" before starting a container.
+    """
+
+    SEED_SQL = "insert into orders default values;"
+
+    def _project(self, tmp_path: Path) -> Path:
+        """A manifest in one directory, the app (and its seed) in a sibling one."""
+        app_dir = tmp_path / "project" / "shop-api"
+        app_dir.mkdir(parents=True)
+        (app_dir / "seed.sql").write_text(self.SEED_SQL)
+        (app_dir / "Dockerfile").write_text("FROM python:3.12-slim\n")
+
+        manifest_dir = tmp_path / "project" / "manifests"
+        manifest_dir.mkdir(parents=True)
+        manifest_path = manifest_dir / "scenario.yaml"
+        data = _manifest_dict(with_database=True)
+        data["compare"]["repo"] = "../shop-api"
+        manifest_path.write_text(yaml.safe_dump(data))
+
+        (tmp_path / "elsewhere").mkdir()
+        return manifest_path
+
+    def _start(self, manifest: Manifest, monkeypatch: pytest.MonkeyPatch) -> MagicMock:
+        """Run start() with Docker/psycopg/httpx mocked; hands back the psycopg conn."""
+        client = _make_client(
+            [
+                _make_container("pg-base", 5432, 55432),
+                _make_container("pg-target", 5432, 55433),
+                _make_container("base", 8000, 18000),
+                _make_container("target", 8000, 18001),
+            ]
+        )
+        conn = MagicMock()
+        conn.__enter__.return_value = conn
+        conn.__exit__.return_value = False
+        monkeypatch.setattr(orch_module.psycopg, "connect", MagicMock(return_value=conn))
+        monkeypatch.setattr(orch_module.subprocess, "run", MagicMock(return_value=MagicMock(returncode=0)))
+        monkeypatch.setattr(orch_module.httpx, "get", MagicMock(return_value=MagicMock(status_code=200)))
+        _quiet_waits(monkeypatch)
+
+        orch = Orchestrator(manifest, docker_client=client)
+        self.client = client
+        orch.start()
+        return conn
+
+    def test_seed_is_found_from_an_unrelated_cwd(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        manifest_path = self._project(tmp_path)
+        # Nothing about the cwd points at the app: no seed.sql, no manifest.
+        monkeypatch.chdir(tmp_path / "elsewhere")
+        manifest = load_manifest(manifest_path)
+
+        conn = self._start(manifest, monkeypatch)
+
+        # Both databases were seeded, from the app directory's seed file.
+        executed = [call.args[0] for call in conn.execute.call_args_list]
+        assert executed.count(self.SEED_SQL) == 2
+
+    def test_repo_checkout_uses_the_same_anchor_as_the_seed(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        manifest_path = self._project(tmp_path)
+        monkeypatch.chdir(tmp_path / "elsewhere")
+        manifest = load_manifest(manifest_path)
+
+        self._start(manifest, monkeypatch)
+
+        app_dir = (tmp_path / "project" / "shop-api").resolve()
+        clones = [
+            call.args[0]
+            for call in orch_module.subprocess.run.call_args_list
+            if call.args[0][:2] == ["git", "clone"]
+        ]
+        assert len(clones) == 2
+        assert all(app_dir.samefile(args[3]) for args in clones)
+
+    def test_missing_seed_names_the_path_it_looked_in(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        manifest_path = self._project(tmp_path)
+        (tmp_path / "project" / "shop-api" / "seed.sql").unlink()
+        monkeypatch.chdir(tmp_path / "elsewhere")
+        manifest = load_manifest(manifest_path)
+
+        # A cwd-local seed file must not rescue a manifest pointing elsewhere.
+        (tmp_path / "elsewhere" / "seed.sql").write_text(self.SEED_SQL)
+
+        with pytest.raises(OrchestratorError, match="seed file not found") as excinfo:
+            self._start(manifest, monkeypatch)
+
+        message = str(excinfo.value)
+        assert str((tmp_path / "project" / "shop-api").resolve()) in message
+
+    def test_absolute_seed_path_is_taken_as_given(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        manifest_path = self._project(tmp_path)
+        absolute_seed = tmp_path / "somewhere-else" / "custom-seed.sql"
+        absolute_seed.parent.mkdir()
+        absolute_seed.write_text(self.SEED_SQL)
+
+        data = yaml.safe_load(manifest_path.read_text())
+        data["database"]["seed"] = str(absolute_seed)
+        manifest_path.write_text(yaml.safe_dump(data))
+
+        monkeypatch.chdir(tmp_path / "elsewhere")
+        manifest = load_manifest(manifest_path)
+
+        assert manifest.seed_path == absolute_seed
+        conn = self._start(manifest, monkeypatch)
+        assert [call.args[0] for call in conn.execute.call_args_list].count(self.SEED_SQL) == 2
+
+    def test_manifest_from_a_dict_still_anchors_on_the_cwd(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # No source file to anchor to, so the cwd is all there is — the
+        # behaviour a caller that hands over a dict has always had.
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "seed.sql").write_text(self.SEED_SQL)
+        manifest = _manifest(with_database=True)
+
+        assert manifest.source_path is None
+        assert manifest.seed_path == (tmp_path / "seed.sql").resolve()
 
 
 class TestCleanup:
