@@ -1,29 +1,19 @@
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { fetchRun } from "../api";
+import BlastRadiusGrid from "../components/BlastRadiusGrid";
 import DemoBackground from "../components/DemoBackground";
+import JsonBlock from "../components/JsonBlock";
+import SequenceDiagram from "../components/SequenceDiagram";
 import StateNotice from "../components/StateNotice";
+import TimelineScrubber from "../components/TimelineScrubber";
 import { changeIntent, humanizeFinding, runHeadline } from "../lib/findings";
+import { scenarioForManifest } from "../lib/scenarios";
 
 const CAT_BADGE = { http: "badge-blue", postgres: "badge-purple", outbound: "badge-orange", latency: "badge-muted" };
 const CAT_ACCENT = { http: "accent-http", postgres: "accent-postgres", outbound: "accent-outbound", latency: "accent-latency" };
 const CLASS_BADGE = { intended: "badge-green", suspicious: "badge-red", noise: "badge-muted" };
 const SEV_ICON = { changed: "~", added: "+", removed: "−" };
-
-function JsonBlock({ label, data, variant }) {
-  if (data == null) return null;
-  return (
-    <div>
-      <div className="ev-label">
-        <span className={`ev-dot ev-dot-${variant}`} />
-        {label}
-      </div>
-      <pre className="ev-pre">
-        {typeof data === "string" ? data : JSON.stringify(data, null, 2)}
-      </pre>
-    </div>
-  );
-}
 
 function FindingCard({ finding, index, classification, manifestPath }) {
   const [open, setOpen] = useState(false);
@@ -122,6 +112,11 @@ export default function RunDetail() {
   const suspicious = classification?.classifications?.filter(c => c.classification === "suspicious").length || 0;
   const headline = runHeadline(run);
   const intent = changeIntent(run);
+  // A run stored before the stream was persisted has no events of its own; if it
+  // ran one of the scripted manifests, that scenario's stream describes the same
+  // shape of run and is enough to draw the sequence.
+  const scenario = scenarioForManifest(run.manifest_path);
+  const events = run.events || scenario?.events || null;
 
   return (
     <div className="demo-page">
@@ -222,11 +217,17 @@ export default function RunDetail() {
         </>
       )}
 
-      {activeTab !== "findings" && (
-        <div className="coming-soon">
-          {activeTab.charAt(0).toUpperCase() + activeTab.slice(1)} view coming soon
-        </div>
+      {activeTab === "sequence" && <SequenceDiagram events={events} findings={findings} />}
+
+      {activeTab === "blast radius" && (
+        <BlastRadiusGrid
+          findings={findings}
+          noiseSummary={noise}
+          totalWorkflows={run.total_workflows}
+        />
       )}
+
+      {activeTab === "timeline" && <TimelineScrubber events={events} findings={findings} />}
     </div>
   );
 }

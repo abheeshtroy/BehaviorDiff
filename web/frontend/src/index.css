@@ -398,8 +398,253 @@ a { color: inherit; text-decoration: none; }
 /* A Link styled as a button — buttons and anchors need the same box here. */
 .act-link { display: inline-block; padding: 8px 18px; font-size: 13px; }
 
-/* ---- Coming soon tab ---- */
-.coming-soon { text-align: center; padding: 60px 0; color: var(--text-3); font-size: 14px; }
+/* ---- Sequence diagram ----
+   Same card as the blast grid and the finding cards; inside it, a spine rather
+   than a table — the run happened in order, and the layout should say so. */
+.seq-wrap {
+  /* The dot column's centre is derived from these, not restated as a number. */
+  --seq-time-w: 68px;
+  --seq-spine-w: 28px;
+  background: var(--bg-1); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); overflow: hidden;
+  backdrop-filter: blur(8px);
+}
+.seq-rows { padding: 6px 0; }
+.seq-row { position: relative; }
+.seq-line {
+  display: grid; grid-template-columns: var(--seq-time-w) var(--seq-spine-w) 1fr;
+  align-items: center; min-height: 34px;
+}
+.seq-time {
+  font-family: var(--mono); font-size: 11px; color: var(--text-3);
+  text-align: right; padding-right: 12px; white-space: nowrap;
+}
+/* The line is drawn on the column, not between rows, so it runs unbroken. */
+.seq-spine {
+  position: relative; align-self: stretch;
+  display: flex; align-items: center; justify-content: center;
+}
+.seq-spine::before {
+  content: ""; position: absolute; top: 0; bottom: 0; left: 50%;
+  width: 1px; margin-left: -0.5px; background: var(--border);
+}
+/* The first and last dots sit on an open end rather than a cut line. */
+.seq-row:first-child .seq-spine::before { top: 50%; }
+.seq-row:last-child .seq-spine::before { bottom: 50%; }
+.seq-dot {
+  position: relative; width: 8px; height: 8px; border-radius: 50%;
+  background: var(--text-3); box-shadow: 0 0 0 3px var(--bg-1);
+}
+.seq-body {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 16px 7px 4px; min-width: 0;
+}
+.seq-icon { font-family: var(--mono); font-size: 11px; color: var(--text-3); }
+.seq-label { font-size: 13px; color: var(--text-2); }
+.seq-summary {
+  font-family: var(--mono); font-size: 11px; color: var(--text-3);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.seq-more { font-family: var(--mono); font-size: 10px; color: var(--text-3); }
+.seq-chevron { font-size: 8px; color: var(--text-3); margin-left: auto; padding-left: 8px; }
+
+.seq-match .seq-dot { background: var(--green); opacity: 0.55; }
+.seq-engine .seq-dot { background: var(--text-3); opacity: 0.7; }
+.seq-engine .seq-label { color: var(--text-3); font-style: italic; }
+.seq-engine .seq-icon { opacity: 0.6; }
+
+.seq-diverge { background: rgba(248, 113, 113, 0.06); }
+.seq-diverge .seq-dot {
+  width: 10px; height: 10px; background: var(--red);
+  box-shadow: 0 0 0 3px var(--bg-1), 0 0 10px rgba(248, 113, 113, 0.45);
+}
+.seq-diverge .seq-label { color: var(--text-1); }
+.seq-diverge .seq-line { cursor: pointer; }
+.seq-diverge .seq-line:hover .seq-label { color: var(--text-0); }
+.seq-diverge .seq-line:focus-visible { outline: 1px solid var(--red-border); outline-offset: -1px; }
+
+.seq-detail {
+  position: relative; background: rgba(248, 113, 113, 0.06);
+  padding: 0 16px 4px calc(var(--seq-time-w) + var(--seq-spine-w));
+}
+/* The spine carries on past an opened row. */
+.seq-detail::before {
+  content: ""; position: absolute; top: 0; bottom: 0;
+  left: calc(var(--seq-time-w) + var(--seq-spine-w) / 2);
+  width: 1px; margin-left: -0.5px; background: var(--border);
+}
+/* The shared evidence grid is indented for the finding card's accent bar;
+   here the spine already provides the offset. */
+.seq-evidence { margin-left: 0; }
+
+.seq-note {
+  font-size: 12px; color: var(--text-3);
+  padding: 12px 16px; border-top: 1px solid var(--border);
+}
+.seq-empty { padding: 44px 16px; text-align: center; color: var(--text-2); font-size: 14px; }
+
+/* ---- Blast radius grid ----
+   Same card treatment as a finding: it sits in the same tab strip, so it has
+   to read as the same surface seen a different way. */
+.blast-wrap {
+  background: var(--bg-1); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); overflow: hidden;
+  backdrop-filter: blur(8px);
+}
+/* Long workflow lists scroll down, extra categories scroll across; the page
+   itself never grows sideways. */
+.blast-scroll { overflow: auto; max-height: 460px; }
+.blast-table { width: 100%; border-collapse: separate; border-spacing: 0; }
+.blast-th {
+  position: sticky; top: 0; z-index: 1;
+  background: var(--bg-2); text-align: right;
+  font-family: var(--mono); font-size: 10px; font-weight: 500;
+  text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-3);
+  padding: 10px 16px; border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.blast-th-row { text-align: left; }
+.blast-row:hover td, .blast-row:hover .blast-rowname { background: var(--bg-hover); }
+/* Findings with no workflow of their own — present, but not a peer of the rows above. */
+.blast-rowname-quiet { color: var(--text-3); }
+.blast-rowname {
+  font-family: var(--mono); font-size: 12px; font-weight: 400;
+  color: var(--text-1); text-align: left; white-space: nowrap;
+  padding: 11px 16px; border-bottom: 1px solid var(--border);
+  transition: background 0.15s;
+}
+.blast-cell {
+  font-family: var(--mono); font-size: 12px; text-align: right;
+  padding: 11px 16px; border-bottom: 1px solid var(--border);
+  border-left: 1px solid var(--border); white-space: nowrap;
+  transition: background 0.15s;
+}
+.blast-clean { background: var(--green-bg); color: var(--green); }
+.blast-diff { background: var(--red-bg); color: var(--red); }
+.blast-tick { opacity: 0.75; }
+/* The cell colour carries the meaning visually; this carries it to a reader. */
+.blast-sr {
+  position: absolute; width: 1px; height: 1px; overflow: hidden;
+  clip: rect(0 0 0 0); white-space: nowrap;
+}
+.blast-total-label, .blast-total {
+  border-bottom: none; color: var(--text-2);
+  background: var(--bg-2); font-size: 12px;
+}
+.blast-total-diff { color: var(--red); }
+.blast-note {
+  font-size: 12px; color: var(--text-3);
+  padding: 12px 16px; border-top: 1px solid var(--border);
+}
+.blast-empty { padding: 44px 16px; text-align: center; color: var(--text-2); font-size: 14px; }
+
+/* ---- Timeline scrubber ----
+   The same card as the sequence spine and the blast grid — one run, three ways
+   of looking at it — with the run laid along a clock inside it. */
+.tl-wrap {
+  --tl-bar-h: 40px;
+  background: var(--bg-1); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); padding: 16px;
+  backdrop-filter: blur(8px);
+}
+.tl-axis {
+  display: flex; justify-content: space-between;
+  font-family: var(--mono); font-size: 10px; color: var(--text-3);
+  letter-spacing: 0.06em; margin-bottom: 6px;
+}
+
+.tl-bar {
+  position: relative; height: var(--tl-bar-h);
+  background: var(--bg-1); border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer; touch-action: none;
+  /* The handle and the cursor's tail hang below the bar. */
+  margin-bottom: 14px;
+}
+.tl-bar:focus-visible { outline: 1px solid var(--border-strong); outline-offset: 2px; }
+.tl-dragging .tl-bar { cursor: grabbing; }
+/* Before the first observed step: the versions were still being built. */
+.tl-lead {
+  position: absolute; top: 0; bottom: 0; left: 0;
+  background: rgba(255,255,255,0.02);
+  border-right: 1px dashed var(--border);
+  border-radius: var(--radius) 0 0 var(--radius);
+}
+
+.tl-tick {
+  position: absolute; transform: translateX(-50%);
+  top: 50%; margin-top: -6px;
+  width: 1px; height: 12px; background: var(--green); opacity: 0.65;
+  pointer-events: none;
+}
+.tl-tick-engine {
+  height: 8px; margin-top: -4px; background: var(--text-3); opacity: 0.9;
+}
+.tl-tick-diverge {
+  top: 0; margin-top: 0; height: 100%;
+  width: 2px; background: var(--red); opacity: 1;
+  box-shadow: 0 0 6px rgba(248,113,113,0.75);
+}
+/* The tick the cursor is resting on, so the bar and the panel agree. */
+.tl-tick-at { opacity: 1; }
+.tl-tick-at.tl-tick-match { height: 18px; margin-top: -9px; }
+.tl-tick-at.tl-tick-engine { height: 14px; margin-top: -7px; }
+
+.tl-cursor {
+  position: absolute; top: -4px; height: calc(100% + 12px);
+  width: 1px; margin-left: -0.5px;
+  background: rgba(255,255,255,0.8);
+  pointer-events: none;
+  transition: left 0.12s ease-out;
+}
+.tl-dragging .tl-cursor { transition: none; }
+.tl-handle {
+  position: absolute; top: -6px; left: 50%;
+  width: 12px; height: 12px; margin-left: -6px;
+  border-radius: 50%; background: var(--text-0);
+  box-shadow: 0 0 0 3px var(--bg-1), 0 0 8px rgba(0,0,0,0.6);
+  cursor: grab; pointer-events: auto;
+}
+.tl-dragging .tl-handle { cursor: grabbing; }
+
+.tl-detail {
+  background: var(--bg-2); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 12px 14px;
+  animation: tl-fade 0.18s ease-out;
+}
+@keyframes tl-fade {
+  from { opacity: 0; transform: translateY(2px); }
+  to { opacity: 1; transform: none; }
+}
+.tl-detail-diverge { background: rgba(248,113,113,0.06); border-color: var(--red-border); }
+.tl-detail-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tl-detail-time {
+  font-family: var(--mono); font-size: 11px; color: var(--text-3);
+  min-width: 52px;
+}
+.tl-detail-icon { font-family: var(--mono); font-size: 11px; color: var(--text-3); }
+.tl-detail-label { font-size: 13px; color: var(--text-1); }
+.tl-detail-engine .tl-detail-label { color: var(--text-3); font-style: italic; }
+.tl-detail-msg { font-size: 12px; color: var(--text-2); margin-top: 6px; padding-left: 60px; }
+.tl-detail-summary {
+  font-family: var(--mono); font-size: 11px; color: var(--text-2);
+  margin-top: 8px; padding-left: 60px;
+}
+.tl-detail-more { color: var(--text-3); }
+/* The shared evidence grid is indented for a finding card's accent bar. */
+.tl-evidence { margin-left: 0; }
+
+.tl-note {
+  display: flex; gap: 10px; flex-wrap: wrap;
+  font-size: 12px; color: var(--text-3); margin-top: 12px;
+}
+.tl-hint { color: var(--text-3); opacity: 0.7; margin-left: auto; }
+.tl-empty { padding: 44px 16px; text-align: center; color: var(--text-2); font-size: 14px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .tl-detail { animation: none; }
+  .tl-cursor { transition: none; }
+}
 
 /* ---- Trigger a run: manifest picker ---- */
 .topbar-cta {
@@ -629,6 +874,9 @@ a { color: inherit; text-decoration: none; }
   .log-waiting { grid-column: 2 / -1; }
   .log-data { margin-left: 14px; }
   .topbar-cta { display: none; }
+  /* Too narrow to keep the detail text aligned under the label column. */
+  .tl-detail-msg, .tl-detail-summary { padding-left: 0; }
+  .tl-hint { margin-left: 0; }
 }
 
 

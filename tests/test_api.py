@@ -92,6 +92,33 @@ def test_list_and_get_run(db_path):
         assert len(detail["result"]["findings"]) == 1
 
 
+def test_get_run_carries_the_persisted_event_stream(db_path):
+    from web import store
+    events = [
+        {"stage": "environments_starting", "message": "starting", "timestamp": 1.0, "data": {"direct": False}},
+        {"stage": "persisting", "message": "Saving the run", "timestamp": 2.0, "data": None},
+    ]
+    with_events = save_run(
+        manifest_path="m.yaml", app_name="shop", result=_make_result(), events=events, db_path=db_path
+    )
+    without_events = save_run(
+        manifest_path="m.yaml", app_name="shop", result=_make_result(), db_path=db_path
+    )
+
+    with patch("web.api.get_run", side_effect=lambda rid, **kw: store.get_run(rid, db_path=db_path)):
+        tc = TestClient(app)
+
+        detail = tc.get(f"/api/runs/{with_events}").json()
+        assert detail["events"] == events
+
+        # A run stored before events were persisted answers with an explicit
+        # null — the key is never simply absent, so the client can tell
+        # "nothing was recorded" from "a field I forgot to read".
+        old = tc.get(f"/api/runs/{without_events}").json()
+        assert "events" in old
+        assert old["events"] is None
+
+
 def test_get_run_not_found(db_path):
     from web import store
     with patch("web.api.get_run", side_effect=lambda rid, **kw: store.get_run(rid, db_path=db_path)):

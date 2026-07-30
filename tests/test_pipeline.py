@@ -8,8 +8,9 @@ test here needs a daemon, a database, a network, or an API key.
 
 from __future__ import annotations
 
+import json
 from typing import Any, Iterator
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 import pytest
 
@@ -348,7 +349,110 @@ def test_the_run_is_persisted_with_the_manifest_path_and_app_name(patched: _Patc
         result=result.model_dump(mode="json"),
         intent=None,
         classification=None,
+        events=ANY,  # contents asserted below, under the event-stream tests
     )
+
+
+def test_done_carries_the_id_the_store_minted(patched: _Patched) -> None:
+    patched.save_run.return_value = "abc123def456"
+
+    done = _only(list(run_pipeline(_manifest())), "done")
+
+    assert done.data["run_id"] == "abc123def456"
+    assert done.json_data()["run_id"] == "abc123def456"
+
+
+# -- the persisted event stream ----------------------------------------------
+
+
+def _saved_events(patched: _Patched) -> list[dict[str, Any]]:
+    return patched.save_run.call_args.kwargs["events"]
+
+
+def test_the_run_is_persisted_with_the_events_it_emitted(patched: _Patched) -> None:
+    list(run_pipeline(_manifest(workflows=2)))
+
+    # Every stage up to the store call, in the order it was yielded. "done"
+    # cannot be in here: save_run is what mints the id that "done" carries.
+    assert [event["stage"] for event in _saved_events(patched)] == [
+        "environments_starting",
+        "environments_ready",
+        "workflow_started",
+        "workflow_completed",
+        "workflow_started",
+        "workflow_completed",
+        "workflows_complete",
+        "observing_http",
+        "comparing",
+        "persisting",
+    ]
+
+
+def test_persisted_events_match_the_events_that_were_yielded(patched: _Patched) -> None:
+    events = list(run_pipeline(_manifest(with_database=True)))
+    saved = _saved_events(patched)
+
+    # One stored dict per yielded event, up to and including "persisting".
+    yielded = events[: len(saved)]
+    assert [event.stage for event in yielded] == [event["stage"] for event in saved]
+    for event, stored in zip(yielded, saved):
+        assert stored == {
+            "stage": event.stage,
+            "message": event.message,
+            "timestamp": event.timestamp,
+            "data": event.json_data(),
+        }
+
+
+def test_persisted_events_are_self_contained(patched: _Patched) -> None:
+    list(run_pipeline(_manifest()))
+
+    for stored in _saved_events(patched):
+        assert set(stored) == {"stage", "message", "timestamp", "data"}
+        assert stored["message"]
+        assert isinstance(stored["timestamp"], float)
+
+
+def test_persisted_events_carry_each_workflow_by_name(patched: _Patched) -> None:
+    list(run_pipeline(_manifest(workflows=3)))
+
+    started = [e for e in _saved_events(patched) if e["stage"] == "workflow_started"]
+    assert [e["data"]["name"] for e in started] == ["workflow-0", "workflow-1", "workflow-2"]
+    assert [e["data"]["index"] for e in started] == [0, 1, 2]
+
+
+def test_persisted_events_are_json_serializable(patched: _Patched, monkeypatch) -> None:
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    intent = ChangeIntent(summary="s")
+
+    with (
+        patch.object(pipeline_module, "extract_intent", return_value=intent),
+        patch.object(pipeline_module, "classify_findings", return_value=ClassificationResult(summary="s")),
+    ):
+        list(run_pipeline(_manifest(), diff_text="--- a/app.py"))
+
+    saved = _saved_events(patched)
+    assert "classifying" in [event["stage"] for event in saved]
+    # The store writes these with json.dumps, so anything unserializable here
+    # would fail the run at persist time rather than at review time.
+    json.dumps(saved)
+
+
+def test_the_live_only_payload_never_reaches_the_store(patched: _Patched) -> None:
+    list(run_pipeline(_manifest()))
+
+    for stored in _saved_events(patched):
+        assert "models" not in (stored["data"] or {})
+        assert "exception" not in (stored["data"] or {})
+
+
+def test_a_failed_run_persists_nothing(patched: _Patched) -> None:
+    patched.compare.side_effect = ValueError("bug in the comparator")
+
+    events = list(run_pipeline(_manifest()))
+
+    assert events[-1].stage == "error"
+    patched.save_run.assert_not_called()
 
 
 def test_json_data_drops_the_in_process_only_keys(patched: _Patched) -> None:

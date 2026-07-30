@@ -25,6 +25,11 @@ Stages, in the order a successful run yields them:
 The generator always ends with exactly one terminal event: a caller can rely
 on seeing "done" or "error" and never has to handle an exception escaping
 mid-iteration. Teardown happens in a finally block regardless.
+
+Every event a successful run yields is also stored with the run, so a caller
+reading it back from the store later has the same progress stream a live
+watcher saw. The stored stream ends at "persisting" — the store call is what
+mints the run id, so nothing after it can be inside the row it wrote.
 """
 
 from __future__ import annotations
@@ -113,11 +118,33 @@ def run_pipeline(
     where the run came from.
     """
     orchestrator: Orchestrator | None = None
+
+    # Every event this run has yielded, in wire-safe form, so the stored run
+    # carries its own progress stream and the detail view can reconstruct the
+    # run's shape in time once the live socket is gone. Persisting happens
+    # before the terminal event by necessity, so "persisting" is the last stage
+    # in here — "done" carries what the store already has.
+    emitted_events: list[dict[str, Any]] = []
+
+    def emit(stage: str, message: str, data: dict[str, Any] | None = None) -> RunEvent:
+        event = _event(stage, message, data)
+        emitted_events.append(
+            {
+                "stage": event.stage,
+                "message": event.message,
+                "timestamp": event.timestamp,
+                # json_data(), not data: the live models and the raw exception
+                # ride along for an in-process caller and cannot be stored.
+                "data": event.json_data(),
+            }
+        )
+        return event
+
     try:
         start = time.monotonic()
         use_direct = base_url and target_url
         if use_direct:
-            yield _event(
+            yield emit(
                 "environments_starting",
                 "Attaching to the running base and target versions",
                 {"direct": True},
@@ -129,7 +156,7 @@ def run_pipeline(
                 target_postgres_dsn=target_pg_dsn or None,
             )
         else:
-            yield _event(
+            yield emit(
                 "environments_starting",
                 "Building and starting both versions",
                 {"direct": False},
@@ -137,7 +164,7 @@ def run_pipeline(
             orchestrator = Orchestrator(manifest)
             handles = orchestrator.start()
 
-        yield _event(
+        yield emit(
             "environments_ready",
             f"Environments ready: base {handles.base_url}, target {handles.target_url}",
             {"base_url": handles.base_url, "target_url": handles.target_url},
@@ -152,7 +179,7 @@ def run_pipeline(
         # out and only real behavioral differences remain.
         observe_db = bool(manifest.database and handles.base_postgres_dsn and handles.target_postgres_dsn)
         if manifest.database and not observe_db:
-            yield _event(
+            yield emit(
                 "postgres_observation_skipped",
                 "Skipping Postgres observation: a dsn is missing for one or both versions",
                 {"reason": "a dsn is missing for one or both versions"},
@@ -162,7 +189,7 @@ def run_pipeline(
         if observe_db:
             assert manifest.database is not None
             tables = manifest.database.observe_tables
-            yield _event(
+            yield emit(
                 "observing_postgres",
                 f"Snapshotting {len(tables)} table(s) before the workflows run",
                 {"phase": "before", "tables": list(tables)},
@@ -177,14 +204,14 @@ def run_pipeline(
         total = len(manifest.workflows)
         with httpx.Client() as client:
             for index, workflow in enumerate(manifest.workflows):
-                yield _event(
+                yield emit(
                     "workflow_started",
                     f"Running workflow: {workflow.name}",
                     {"name": workflow.name, "index": index, "total": total},
                 )
                 result = run_workflows([workflow], handles, client=client)[0]
                 workflow_results.append(result)
-                yield _event(
+                yield emit(
                     "workflow_completed",
                     f"Finished workflow: {workflow.name} ({len(result.steps)} step(s))",
                     {
@@ -195,7 +222,7 @@ def run_pipeline(
                     },
                 )
 
-        yield _event(
+        yield emit(
             "workflows_complete",
             f"Ran {len(workflow_results)} workflow(s)",
             {"count": len(workflow_results)},
@@ -205,7 +232,7 @@ def run_pipeline(
         total_steps = sum(len(wr.steps) for wr in workflow_results)
 
         # Observe HTTP
-        yield _event("observing_http", "Comparing HTTP responses")
+        yield emit("observing_http", "Comparing HTTP responses")
         http_observer = HttpObserver()
         base_obs, target_obs = http_observer.observe(workflow_results)
         http_diffs = HttpObserver.diff(base_obs, target_obs)
@@ -216,7 +243,7 @@ def run_pipeline(
             assert manifest.database is not None
             assert base_pg_before is not None and target_pg_before is not None
             tables = manifest.database.observe_tables
-            yield _event(
+            yield emit(
                 "observing_postgres",
                 f"Snapshotting {len(tables)} table(s) after the workflows ran",
                 {"phase": "after", "tables": list(tables)},
@@ -234,7 +261,7 @@ def run_pipeline(
         duration = time.monotonic() - start
 
         # Compare
-        yield _event("comparing", "Comparing observations")
+        yield emit("comparing", "Comparing observations")
         result = compare(
             http_diffs=http_diffs,
             postgres_diff=pg_diff,
@@ -252,7 +279,7 @@ def run_pipeline(
         classification = None
         proposal = None
         if diff_text is not None:
-            yield _event(
+            yield emit(
                 "classifying",
                 f"Classifying {len(result.findings)} finding(s) against the change's intent",
                 {"findings": len(result.findings)},
@@ -267,16 +294,19 @@ def run_pipeline(
         classification_payload = classification.model_dump(mode="json") if classification else None
         proposal_payload = proposal.model_dump(mode="json") if proposal else None
 
-        yield _event("persisting", "Saving the run")
+        yield emit("persisting", "Saving the run")
         run_id = save_run(
             manifest_path=str(manifest_path) if manifest_path is not None else "",
             app_name=manifest.app.name,
             result=result_payload,
             intent=intent_payload,
             classification=classification_payload,
+            # A copy: the generator keeps emitting after this call, and what was
+            # persisted must not change under the store afterwards.
+            events=list(emitted_events),
         )
 
-        yield _event(
+        yield emit(
             "done",
             f"Run complete: {len(result.findings)} finding(s)",
             {

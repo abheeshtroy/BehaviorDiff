@@ -2,7 +2,7 @@
 // so the picker can show one story per comparison and the bridge CTA can
 // preselect the right file. It is an explicit field, not derived: the
 // api-cleanup scenario lives in scenario3-response-cleanup.yaml.
-export const SCENARIOS = {
+const SCRIPTS = {
   "checkout-validation": {
     id: "checkout-validation",
     manifest: "scenario1-checkout-validation.yaml",
@@ -151,5 +151,77 @@ export const SCENARIOS = {
     ],
   },
 };
+
+// ---- Synthetic event streams ------------------------------------------------
+//
+// A stored run carries the progress stream the pipeline emitted (see
+// run_pipeline in engine/pipeline.py), and the views built on top of it read
+// stages and timestamps. The scripted scenarios have no pipeline behind them,
+// so they script the stream too — same stages, same order, same data keys as a
+// real run, so a view never has to know which kind of run it is looking at.
+//
+// Timestamps are seconds since the epoch like the real ones. The absolute
+// values are arbitrary; the gaps are what carries meaning.
+
+const EPOCH = 1_753_000_000;
+
+// Gaps in milliseconds, roughly what each stage costs in a real run: standing
+// the two versions up dominates, everything after it is fast.
+const GAP = {
+  ready: 1800,
+  snapshot: 220,
+  workflow: 380,
+  observe: 90,
+  compare: 140,
+  classify: 640,
+  persist: 40,
+  done: 30,
+};
+
+/** Every workflow the scenario's findings mention, in the order they appear. */
+function workflowNames(scenario) {
+  const names = scenario.findings.map((f) => f.workflow).filter(Boolean);
+  return [...new Set(names)];
+}
+
+function syntheticEvents(scenario) {
+  const events = [];
+  let elapsedMs = 0;
+
+  const push = (gapMs, stage, message, data = null) => {
+    elapsedMs += gapMs;
+    events.push({ stage, message, timestamp: EPOCH + elapsedMs / 1000, data });
+  };
+
+  push(0, "environments_starting", "Building and starting both versions", { direct: false });
+  push(GAP.ready, "environments_ready", "Environments ready: base http://localhost:8001, target http://localhost:8002", {
+    base_url: "http://localhost:8001",
+    target_url: "http://localhost:8002",
+  });
+  push(GAP.snapshot, "observing_postgres", "Snapshotting tables before the workflows run", { phase: "before" });
+
+  const names = workflowNames(scenario);
+  names.forEach((name, index) => {
+    const total = names.length;
+    push(GAP.observe, "workflow_started", `Running workflow: ${name}`, { name, index, total });
+    push(GAP.workflow, "workflow_completed", `Finished workflow: ${name}`, { name, index, total });
+  });
+
+  push(GAP.observe, "workflows_complete", `Ran ${names.length} workflow(s)`, { count: names.length });
+  push(GAP.observe, "observing_http", "Comparing HTTP responses");
+  push(GAP.snapshot, "observing_postgres", "Snapshotting tables after the workflows ran", { phase: "after" });
+  push(GAP.compare, "comparing", "Comparing observations");
+  push(GAP.classify, "classifying", `Classifying ${scenario.findings.length} finding(s) against the change's intent`, {
+    findings: scenario.findings.length,
+  });
+  push(GAP.persist, "persisting", "Saving the run");
+  push(GAP.done, "done", `Run complete: ${scenario.findings.length} finding(s)`);
+
+  return events;
+}
+
+export const SCENARIOS = Object.fromEntries(
+  Object.entries(SCRIPTS).map(([id, scenario]) => [id, { ...scenario, events: syntheticEvents(scenario) }]),
+);
 
 export const SCENARIO_LIST = Object.values(SCENARIOS);
