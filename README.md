@@ -31,14 +31,20 @@ You point BehaviorDiff at two running versions of the same app (base and target)
 
 The observation surface is configured, not assumed. You choose which HTTP routes to exercise, which database tables to snapshot, and which outbound services to mock. Noise (timestamps, UUIDs, row ordering) is suppressed by measurement, not by rules alone.
 
+It runs from the CLI or from a web dashboard, which triggers runs, streams their progress live, and keeps every run around to look at afterwards.
+
 ## Architecture
 
 ```
-CLI (cli.py)
-    │
-    ├── --init: scan repo → AI generates starter manifest
-    │
-    ▼
+CLI (cli.py)                      Web API (web/api.py)
+    │                                  │
+    ├── --init: scan repo →            ├── POST /api/runs/trigger
+    │   AI generates starter manifest  └── WS /api/runs/{id}/stream
+    │                                  │
+    └──────────────────┬───────────────┘
+                       │  Both drive the same pipeline (engine/pipeline.py),
+                       │  a generator that yields progress events as it goes
+                       ▼
 Manifest parser (engine/manifest.py)
     │  Pydantic validation, extra="forbid" to catch typos
     ▼
@@ -68,6 +74,14 @@ AI Layer (ai/)
     ├── workflow_gen.py:  diff + routes → proposed test workflows
     ├── manifest_gen.py: repo scan → starter manifest with accurate request bodies
     └── scaffold.py:     extract routes and tables from code (heuristic, not a parser)
+    │
+    ▼
+Store (web/store.py)
+    │  Every run — CLI or web-triggered — persisted to SQLite,
+    │  result and event stream together
+    ▼
+Dashboard (web/frontend/)
+       React SPA: findings, sequence diagram, blast radius, timeline
 ```
 
 ## Quick start
@@ -103,6 +117,10 @@ python cli.py demo/manifests/scenario1-checkout-validation.yaml
 ```
 
 Or trigger it from the dashboard at `/runs/new` and watch the events stream in.
+
+Either way the run is saved, so anything you run from the CLI also shows up in
+the dashboard — open `/runs` and click it to get all four views of the run. See
+[Web dashboard](#web-dashboard) for how to start it.
 
 ### 3. Or run against already-started versions
 
@@ -156,6 +174,62 @@ scenario 1 observes — that's how "it charged the customer before rejecting the
 address" becomes visible to a database observer. Outbound HTTP interception is
 not wired into the run path yet (see Roadmap), so the payment provider is
 stubbed in-process when `PAYMENT_URL` is unset, which is how the engine runs it.
+
+## Web dashboard
+
+Build the frontend once, then serve it from the API:
+
+```bash
+cd web/frontend && npm install && npm run build
+python -m uvicorn web.api:app --port 8100
+```
+
+Open http://localhost:8100. FastAPI serves the built SPA and the JSON API from
+the same port, so there is nothing else to run.
+
+For frontend work, `cd web/frontend && npm run dev` puts Vite on 5173 with
+`/api` proxied to 8100 — including the WebSocket upgrade, so the live run
+stream works in dev too. Keep uvicorn running alongside it.
+
+### What's in it
+
+**Landing page with interactive demo scenarios.** Scripted walkthroughs of the
+three seeded scenarios that replay a recorded run — no Docker, no database, no
+API key. They're there so the tool can be understood in thirty seconds without
+anyone building an image first.
+
+**Run triggering** (`/runs/new`). Pick one of the manifests the server
+discovered, start it, and watch the pipeline report itself over a WebSocket:
+building images, starting containers, each workflow step, normalization,
+comparison. When it finishes you land on the result. Only manifests found in
+the manifest directory can be started — the requested path is matched by
+resolved path against that set, so a traversal or a symlink doesn't get through.
+Point it elsewhere with `BEHAVIORDIFF_MANIFEST_DIR` (default `demo/manifests`).
+
+**Run detail** (`/runs/{id}`), four views of the same run:
+
+| View | What it shows |
+|---|---|
+| Findings | Classified differences, click one to expand base/target evidence side by side |
+| Sequence diagram | Vertical timeline of the run's events, with findings anchored to the step that produced them |
+| Blast radius | Which workflows were affected, across which observation surfaces |
+| Timeline scrubber | Horizontal DAW-style bar with a draggable cursor for scrubbing through the run |
+
+**Run history** (`/runs`). Every persisted run with its stats — workflows,
+steps, findings, suppressed differences, duration.
+
+### How runs are persisted
+
+Every run, whether it came from the CLI or from the dashboard, is written to
+`~/.behaviordiff/runs.db` (SQLite). The result JSON, the AI intent and
+classification if they were produced, and the event stream all go in together.
+
+Persisting the events is what makes the sequence diagram and timeline work after
+the fact: the live WebSocket is gone once the run ends, but the run's shape in
+time was already recorded, so the visualizations replay from storage instead of
+needing the socket. Runs stored before that column existed read back with no
+events; the detail view falls back to the scripted scenario's stream when the
+manifest is one of the demo ones, and otherwise just doesn't draw those views.
 
 ## Key design decisions
 
@@ -214,12 +288,21 @@ ai/
   manifest_gen.py      # Repo scan → starter manifest
   scaffold.py          # Route/table extraction helpers
 
+web/
+  api.py               # FastAPI: manifest discovery, run trigger, WS stream, run reads
+  run_registry.py      # In-flight runs: pipeline on a thread, events over a queue
+  store.py             # SQLite persistence for results and event streams
+  frontend/
+    src/pages/         # Landing, DemoRun, RunNew, RunList, RunDetail
+    src/components/    # SequenceDiagram, BlastRadiusGrid, TimelineScrubber, ...
+    src/lib/           # Event → view-model logic, unit-tested apart from React
+
 demo/
   shop-api/            # FastAPI demo app with 3 seeded bug scenarios
   manifests/           # Hand-written manifests for each scenario
   docker-compose.yaml  # Two app versions + two Postgres + payment mock
 
-tests/                 # 241 tests, all passing
+tests/                 # 340+ Python tests, all passing
 ```
 
 ## Tech stack
@@ -230,11 +313,19 @@ tests/                 # 241 tests, all passing
 - httpx for HTTP, psycopg for Postgres
 - structlog for structured logging
 - Anthropic API (Claude Sonnet 4.6) for AI features
-- pytest for testing (241 tests, 0.5s)
+- FastAPI + SQLite for the web API and run storage
+- React + Vite for the dashboard
+- pytest for the engine (340+ tests), vitest for the frontend (130+ tests)
 
 ## Roadmap
 
-- [ ] Web UI — React dashboard for findings with classification labels
+Phase 3 is done — the web dashboard, the live run stream, run persistence, and
+the four run views are all in. Next:
+
+- [ ] Benchmark / evaluation harness with seeded regressions — measure detection rate, not just "it found something"
+- [ ] Public deployment so the demo is reachable without cloning
+- [ ] Demo video
+- [ ] Fix scenario 3 (downstream consumer) — response-cleanup isn't demo-ready yet
 - [ ] CLI observer — compare stdout/stderr/exit codes for non-HTTP apps
 - [ ] File system observer — diff output directories for data pipelines
 - [ ] MySQL / MongoDB observers
