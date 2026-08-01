@@ -9,7 +9,7 @@ to catch.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 
 from app.orders import get_order
 
