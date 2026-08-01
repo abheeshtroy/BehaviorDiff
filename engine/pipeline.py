@@ -252,7 +252,7 @@ def run_pipeline(
             target_pg_after = PostgresObserver(handles.target_postgres_dsn).snapshot(tables)
             base_delta = PostgresObserver.diff(base_pg_before, base_pg_after)
             target_delta = PostgresObserver.diff(target_pg_before, target_pg_after)
-            pg_diff = PostgresObserver.compare_deltas(base_delta, target_delta)
+            pg_diff = PostgresObserver.compare_deltas(base_delta, target_delta, config=manifest.normalize)
 
         # Observe outbound calls
         outbound_diff = None

@@ -17,6 +17,9 @@ from psycopg import sql
 from psycopg.rows import dict_row
 from pydantic import BaseModel, Field
 
+from engine.manifest import NormalizeConfig
+from engine.normalizer import Normalizer
+
 log = structlog.get_logger(__name__)
 
 
@@ -123,7 +126,9 @@ class PostgresObserver:
         return PostgresDiff(tables=tables, primary_keys=primary_keys)
 
     @staticmethod
-    def compare_deltas(base_delta: PostgresDiff, target_delta: PostgresDiff) -> PostgresDiff:
+    def compare_deltas(
+        base_delta: PostgresDiff, target_delta: PostgresDiff, config: NormalizeConfig | None = None
+    ) -> PostgresDiff:
         """Compare what changed in base's own database against what changed in target's own database.
 
         With separate databases per version, comparing final states directly
@@ -142,7 +147,15 @@ class PostgresObserver:
         compared by their resulting (after) values; a row only one side
         modified is reported directly, since the other side's current value
         is whatever it started as.
+
+        Rows are paired across sides by *normalized* primary key rather than
+        raw primary key: a primary key that's a UUID generated independently
+        by each version's own server (the common case) never matches
+        literally across two separate databases, even for a behaviorally
+        identical row. Normalizing first reuses the same positional
+        placeholder logic already used for HTTP bodies.
         """
+        config = config or NormalizeConfig()
         table_names = sorted(set(base_delta.tables) | set(target_delta.tables))
         result_tables: dict[str, TableDiff] = {}
         primary_keys: dict[str, list[str]] = {}
@@ -165,70 +178,75 @@ class PostgresObserver:
                 pk_columns,
                 base_delta.tables.get(table, TableDiff()),
                 target_delta.tables.get(table, TableDiff()),
+                config,
             )
 
         return PostgresDiff(tables=result_tables, primary_keys=primary_keys)
 
     @staticmethod
     def _compare_table_deltas(
-        table: str, pk_columns: list[str], base_diff: TableDiff, target_diff: TableDiff
+        table: str, pk_columns: list[str], base_diff: TableDiff, target_diff: TableDiff, config: NormalizeConfig
     ) -> TableDiff:
+        base_normalizer = Normalizer(config)
+        target_normalizer = Normalizer(config)
+
         inserted: list[dict[str, Any]] = []
         deleted: list[dict[str, Any]] = []
         modified: list[RowChange] = []
 
         # -- inserts: only base -> deleted finding, only target -> inserted finding,
-        # both with different values -> modified finding.
-        base_inserted = {PostgresObserver._pk_tuple(pk_columns, table, row): row for row in base_diff.inserted}
-        target_inserted = {PostgresObserver._pk_tuple(pk_columns, table, row): row for row in target_diff.inserted}
-
-        for pk in base_inserted.keys() - target_inserted.keys():
-            deleted.append(base_inserted[pk])
-        for pk in target_inserted.keys() - base_inserted.keys():
-            inserted.append(target_inserted[pk])
-        for pk in base_inserted.keys() & target_inserted.keys():
-            base_row, target_row = base_inserted[pk], target_inserted[pk]
-            if base_row != target_row:
+        # both with the same normalized pk but different normalized values -> modified finding.
+        paired, only_base, only_target = PostgresObserver._pair_rows_by_normalized_pk(
+            base_diff.inserted, target_diff.inserted, pk_columns, base_normalizer, target_normalizer
+        )
+        deleted.extend(only_base)
+        inserted.extend(only_target)
+        for base_row, base_normalized, target_row, target_normalized in paired:
+            if base_normalized != target_normalized:
                 modified.append(
-                    RowChange(primary_key=dict(zip(pk_columns, pk, strict=True)), before=base_row, after=target_row)
+                    RowChange(
+                        primary_key=dict(
+                            zip(pk_columns, PostgresObserver._pk_tuple(pk_columns, table, base_row), strict=True)
+                        ),
+                        before=base_row,
+                        after=target_row,
+                    )
                 )
 
         # -- deletes: mirrored polarity, since "only base deleted this row" means
         # target's database still has it.
-        base_deleted = {PostgresObserver._pk_tuple(pk_columns, table, row): row for row in base_diff.deleted}
-        target_deleted = {PostgresObserver._pk_tuple(pk_columns, table, row): row for row in target_diff.deleted}
-
-        for pk in base_deleted.keys() - target_deleted.keys():
-            inserted.append(base_deleted[pk])
-        for pk in target_deleted.keys() - base_deleted.keys():
-            deleted.append(target_deleted[pk])
-        for pk in base_deleted.keys() & target_deleted.keys():
-            base_row, target_row = base_deleted[pk], target_deleted[pk]
-            if base_row != target_row:
+        paired, only_base, only_target = PostgresObserver._pair_rows_by_normalized_pk(
+            base_diff.deleted, target_diff.deleted, pk_columns, base_normalizer, target_normalizer
+        )
+        inserted.extend(only_base)
+        deleted.extend(only_target)
+        for base_row, base_normalized, target_row, target_normalized in paired:
+            if base_normalized != target_normalized:
                 modified.append(
-                    RowChange(primary_key=dict(zip(pk_columns, pk, strict=True)), before=base_row, after=target_row)
+                    RowChange(
+                        primary_key=dict(
+                            zip(pk_columns, PostgresObserver._pk_tuple(pk_columns, table, base_row), strict=True)
+                        ),
+                        before=base_row,
+                        after=target_row,
+                    )
                 )
 
         # -- modifies: both -> compare resulting (after) values, only one side ->
         # report directly (the other side's current value is whatever it started as).
-        base_modified = {
-            tuple(change.primary_key[col] for col in pk_columns): change for change in base_diff.modified
-        }
-        target_modified = {
-            tuple(change.primary_key[col] for col in pk_columns): change for change in target_diff.modified
-        }
-
-        for pk in base_modified.keys() - target_modified.keys():
-            change = base_modified[pk]
+        paired_changes, only_base_changes, only_target_changes = PostgresObserver._pair_changes_by_normalized_pk(
+            base_diff.modified, target_diff.modified, pk_columns, base_normalizer, target_normalizer
+        )
+        for change in only_base_changes:
             modified.append(RowChange(primary_key=change.primary_key, before=change.after, after=change.before))
-        for pk in target_modified.keys() - base_modified.keys():
-            change = target_modified[pk]
+        for change in only_target_changes:
             modified.append(RowChange(primary_key=change.primary_key, before=change.before, after=change.after))
-        for pk in base_modified.keys() & target_modified.keys():
-            base_change, target_change = base_modified[pk], target_modified[pk]
-            if base_change.after != target_change.after:
+        for base_change, base_after_normalized, target_change, target_after_normalized in paired_changes:
+            if base_after_normalized != target_after_normalized:
                 modified.append(
-                    RowChange(primary_key=base_change.primary_key, before=base_change.after, after=target_change.after)
+                    RowChange(
+                        primary_key=base_change.primary_key, before=base_change.after, after=target_change.after
+                    )
                 )
 
         def row_sort_key(row: dict[str, Any]) -> tuple[str, ...]:
@@ -242,6 +260,85 @@ class PostgresObserver:
             deleted=sorted(deleted, key=row_sort_key),
             modified=sorted(modified, key=change_sort_key),
         )
+
+    @staticmethod
+    def _pair_rows_by_normalized_pk(
+        base_rows: list[dict[str, Any]],
+        target_rows: list[dict[str, Any]],
+        pk_columns: list[str],
+        base_normalizer: Normalizer,
+        target_normalizer: Normalizer,
+    ) -> tuple[
+        list[tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]],
+        list[dict[str, Any]],
+        list[dict[str, Any]],
+    ]:
+        """Pair rows across two sides by normalized primary key, not raw primary key.
+
+        Returns (paired, only_base, only_target). Each paired entry carries
+        both raw rows plus both normalized rows: the caller builds a Finding
+        from the raw data while deciding "changed or not" from the normalized
+        data. Rows are consumed in list order, so ties pair up positionally.
+        """
+        target_by_key: dict[tuple[Any, ...], list[tuple[dict[str, Any], dict[str, Any]]]] = {}
+        for row in target_rows:
+            normalized, _ = target_normalizer.normalize(row)
+            key = tuple(normalized[col] for col in pk_columns)
+            target_by_key.setdefault(key, []).append((row, normalized))
+
+        paired: list[tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]] = []
+        only_base: list[dict[str, Any]] = []
+
+        for row in base_rows:
+            normalized, _ = base_normalizer.normalize(row)
+            key = tuple(normalized[col] for col in pk_columns)
+            bucket = target_by_key.get(key)
+            if bucket:
+                target_row, target_normalized = bucket.pop(0)
+                paired.append((row, normalized, target_row, target_normalized))
+            else:
+                only_base.append(row)
+
+        only_target = [row for bucket in target_by_key.values() for row, _ in bucket]
+        return paired, only_base, only_target
+
+    @staticmethod
+    def _pair_changes_by_normalized_pk(
+        base_changes: list[RowChange],
+        target_changes: list[RowChange],
+        pk_columns: list[str],
+        base_normalizer: Normalizer,
+        target_normalizer: Normalizer,
+    ) -> tuple[list[tuple[RowChange, dict[str, Any], RowChange, dict[str, Any]]], list[RowChange], list[RowChange]]:
+        """Same pairing strategy as _pair_rows_by_normalized_pk, for RowChange objects."""
+
+        def normalized_pk_and_after(
+            change: RowChange, normalizer: Normalizer
+        ) -> tuple[tuple[Any, ...], dict[str, Any]]:
+            normalized_pk_row, _ = normalizer.normalize(change.primary_key)
+            normalized_after, _ = normalizer.normalize(change.after)
+            key = tuple(normalized_pk_row[col] for col in pk_columns)
+            return key, normalized_after
+
+        target_by_key: dict[tuple[Any, ...], list[tuple[RowChange, dict[str, Any]]]] = {}
+        for change in target_changes:
+            key, normalized_after = normalized_pk_and_after(change, target_normalizer)
+            target_by_key.setdefault(key, []).append((change, normalized_after))
+
+        paired: list[tuple[RowChange, dict[str, Any], RowChange, dict[str, Any]]] = []
+        only_base: list[RowChange] = []
+
+        for change in base_changes:
+            key, normalized_after = normalized_pk_and_after(change, base_normalizer)
+            bucket = target_by_key.get(key)
+            if bucket:
+                target_change, target_after = bucket.pop(0)
+                paired.append((change, normalized_after, target_change, target_after))
+            else:
+                only_base.append(change)
+
+        only_target = [change for bucket in target_by_key.values() for change, _ in bucket]
+        return paired, only_base, only_target
 
     @staticmethod
     def _diff_table(
