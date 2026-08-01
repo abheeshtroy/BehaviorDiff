@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
-from app import carts, checkout, fulfillment, orders
+from app import carts, checkout, fulfillment, orders, receipts
 
 app = FastAPI(title="shop-api")
 
@@ -26,3 +26,4 @@ app.include_router(carts.router)
 app.include_router(checkout.router)
 app.include_router(fulfillment.router)
 app.include_router(orders.router)
+app.include_router(receipts.router)

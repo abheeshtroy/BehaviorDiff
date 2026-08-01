@@ -29,6 +29,8 @@ workflows:
         capture: {"order_id": "$.order_id"}
       - method: GET
         path: /api/orders/{order_id}
+      - method: GET
+        path: /api/orders/{order_id}/receipt
 
 normalize:
   ignore_fields:

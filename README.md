@@ -167,7 +167,7 @@ The repo ships with three seeded scenarios against a FastAPI shop API, each with
 |---|---|---|---|
 | checkout-validation | `app/checkout.py` | 400 instead of 500 on a bad address | Payment authorized before validation; discount cleared on rejection |
 | retry-logic | `app/fulfillment.py` | Retry queueing the fulfill job | Duplicate background jobs created |
-| response-cleanup | `app/orders.py` | Rename `total` → `amount`, change type | Breaks consumers expecting `total` as a string |
+| response-cleanup | `app/orders.py` | Rename `total` → `amount`, change type | `GET /api/orders/{id}/receipt`, an untouched consumer, 500s on the renamed fields |
 
 The app records every payment authorization in `payment_calls`, which
 scenario 1 observes — that's how "it charged the customer before rejecting the
@@ -325,7 +325,6 @@ the four run views are all in. Next:
 - [ ] Benchmark / evaluation harness with seeded regressions — measure detection rate, not just "it found something"
 - [ ] Public deployment so the demo is reachable without cloning
 - [ ] Demo video
-- [ ] Fix scenario 3 (downstream consumer) — response-cleanup isn't demo-ready yet
 - [ ] CLI observer — compare stdout/stderr/exit codes for non-HTTP apps
 - [ ] File system observer — diff output directories for data pipelines
 - [ ] MySQL / MongoDB observers
