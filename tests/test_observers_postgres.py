@@ -11,6 +11,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from engine.manifest import NormalizeConfig
 from engine.observers import postgres as pg_module
 from engine.observers.postgres import (
     PostgresDiff,
@@ -286,6 +287,70 @@ def test_compare_deltas_mixed_scenario_across_multiple_categories() -> None:
     # both modified id=2 identically (pending -> shipped) -> cancels out
     assert table.deleted == []
     assert table.modified == []
+
+
+def test_compare_deltas_identical_row_with_different_random_uuid_pk_produces_no_findings() -> None:
+    """Reproduces the Scenario 3 bug: each version's server generates its own
+    random UUID for a new row's primary key (and any foreign key), so the raw
+    values never match across two separate databases even when the row is,
+    behaviourally, identical."""
+    base_delta = _delta(
+        "orders",
+        ["id"],
+        [],
+        [
+            {
+                "id": "11111111-1111-1111-1111-111111111111",
+                "cart_id": "22222222-2222-2222-2222-222222222222",
+                "total": 4500,
+                "status": "confirmed",
+            }
+        ],
+    )
+    target_delta = _delta(
+        "orders",
+        ["id"],
+        [],
+        [
+            {
+                "id": "33333333-3333-3333-3333-333333333333",
+                "cart_id": "44444444-4444-4444-4444-444444444444",
+                "total": 4500,
+                "status": "confirmed",
+            }
+        ],
+    )
+
+    result = PostgresObserver.compare_deltas(base_delta, target_delta, config=NormalizeConfig())
+
+    assert result.tables["orders"].inserted == []
+    assert result.tables["orders"].deleted == []
+    assert result.tables["orders"].modified == []
+
+
+def test_compare_deltas_random_uuid_pk_with_genuinely_different_content_is_modified() -> None:
+    """Same random-pk situation, but the row really is different this time --
+    should still surface as exactly one modified finding, not an add+delete."""
+    base_delta = _delta(
+        "orders",
+        ["id"],
+        [],
+        [{"id": "11111111-1111-1111-1111-111111111111", "total": 4500, "status": "confirmed"}],
+    )
+    target_delta = _delta(
+        "orders",
+        ["id"],
+        [],
+        [{"id": "33333333-3333-3333-3333-333333333333", "total": 4500, "status": "cancelled"}],
+    )
+
+    result = PostgresObserver.compare_deltas(base_delta, target_delta, config=NormalizeConfig())
+
+    [modified] = result.tables["orders"].modified
+    assert modified.before["status"] == "confirmed"
+    assert modified.after["status"] == "cancelled"
+    assert result.tables["orders"].inserted == []
+    assert result.tables["orders"].deleted == []
 
 
 # -- snapshot(): mocked psycopg connection -------------------------------------
