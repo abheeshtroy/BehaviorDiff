@@ -23,7 +23,7 @@ import subprocess
 import tempfile
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import docker
@@ -37,6 +37,7 @@ from docker.models.images import Image
 from docker.models.networks import Network
 
 from engine.manifest import Manifest
+from engine.observers.proxy import ProxyObserver
 
 log = structlog.get_logger(__name__)
 
@@ -51,9 +52,24 @@ _POSTGRES_READY_INTERVAL_S = 0.5
 _HEALTHCHECK_TIMEOUT_S = 60.0
 _HEALTHCHECK_INTERVAL_S = 0.5
 
+# Containers reach the proxies running on the engine's host through Docker's
+# special DNS name for the host machine.
+_DOCKER_HOST_GATEWAY = "host.docker.internal"
+
 
 class OrchestratorError(Exception):
     """Raised when the orchestrator fails to stand up or tear down a run."""
+
+
+def _outbound_env_var(service_name: str) -> str:
+    """Env var an app reads to find the proxy standing in for one service.
+
+    "payment-provider" becomes OUTBOUND_PAYMENT_PROVIDER_URL: anything that
+    isn't alphanumeric becomes an underscore, since service names are free-form
+    manifest strings and env var names are not.
+    """
+    slug = "".join(char if char.isalnum() else "_" for char in service_name).upper()
+    return f"OUTBOUND_{slug}_URL"
 
 
 @dataclass
@@ -64,6 +80,11 @@ class RunHandles:
     target_url: str
     base_postgres_dsn: str | None
     target_postgres_dsn: str | None
+    # One proxy per manifest outbound service, per version, in manifest order:
+    # the two lists are positionally paired so a service's base and target
+    # recordings can be diffed against each other.
+    base_proxy_observers: list[ProxyObserver] = field(default_factory=list)
+    target_proxy_observers: list[ProxyObserver] = field(default_factory=list)
 
 
 class Orchestrator:
@@ -82,6 +103,8 @@ class Orchestrator:
         self._containers: list[Container] = []
         self._images: list[str] = []
         self._workdirs: list[Path] = []
+        self._base_proxy_observers: list[ProxyObserver] = []
+        self._target_proxy_observers: list[ProxyObserver] = []
 
     def start(self) -> RunHandles:
         """Build both versions, start them alongside Postgres, and wait for health.
@@ -114,6 +137,9 @@ class Orchestrator:
                 base_postgres_dsn = self._postgres_dsn(host="localhost", port=self._base_postgres_host_port)
                 target_postgres_dsn = self._postgres_dsn(host="localhost", port=self._target_postgres_host_port)
 
+            # Before the apps, so their environment can name the proxy ports.
+            self._start_proxies()
+
             base_container, base_port = self._start_app("base", self.manifest.compare.base_ref)
             target_container, target_port = self._start_app("target", self.manifest.compare.target_ref)
 
@@ -129,6 +155,8 @@ class Orchestrator:
                 target_url=target_url,
                 base_postgres_dsn=base_postgres_dsn,
                 target_postgres_dsn=target_postgres_dsn,
+                base_proxy_observers=list(self._base_proxy_observers),
+                target_proxy_observers=list(self._target_proxy_observers),
             )
         except Exception:
             log.error("run setup failed, cleaning up", run_id=self.run_id)
@@ -141,6 +169,11 @@ class Orchestrator:
         Best-effort: a failure removing one resource is logged and does not
         prevent the rest from being cleaned up. Safe to call more than once.
         """
+        for observer in [*self._base_proxy_observers, *self._target_proxy_observers]:
+            self._safe_stop_proxy(observer)
+        self._base_proxy_observers.clear()
+        self._target_proxy_observers.clear()
+
         for container in reversed(self._containers):
             self._safe_remove_container(container)
         self._containers.clear()
@@ -259,6 +292,66 @@ class Orchestrator:
         p = port if port is not None else _POSTGRES_PORT
         return f"postgresql://{_POSTGRES_USER}:{_POSTGRES_PASSWORD}@{host}:{p}/{_POSTGRES_DB}"
 
+    # -- outbound proxies ------------------------------------------------------
+
+    def _start_proxies(self) -> None:
+        """Start one proxy per outbound service, per version.
+
+        Each version gets its own proxy so the calls it makes are recorded
+        separately — a shared proxy would interleave both versions' calls into
+        one list with no way to attribute them.
+        """
+        if self.manifest.outbound is None:
+            return
+
+        for service in self.manifest.outbound.services:
+            for label, observers in (
+                ("base", self._base_proxy_observers),
+                ("target", self._target_proxy_observers),
+            ):
+                # Port 0: the OS assigns a free port, read back via .address.
+                observer = ProxyObserver(service, port=0)
+                # Track before starting can fail, so cleanup owns it either way.
+                observers.append(observer)
+                try:
+                    observer.start()
+                except OSError as exc:
+                    raise OrchestratorError(
+                        f"failed to start {label} proxy for outbound service {service.name!r}: {exc}"
+                    ) from exc
+                log.info(
+                    "proxy listening",
+                    label=label,
+                    service=service.name,
+                    port=observer.address[1],
+                )
+
+    def _proxy_observers(self, label: str) -> list[ProxyObserver]:
+        if label == "base":
+            return self._base_proxy_observers
+        if label == "target":
+            return self._target_proxy_observers
+        raise OrchestratorError(f"unknown version label {label!r}: expected 'base' or 'target'")
+
+    def _outbound_environment(self, label: str) -> dict[str, str]:
+        """Point one version's app at its own proxies instead of the real services.
+
+        The app is expected to read OUTBOUND_{SERVICE_NAME}_URL and send that
+        service's calls there; without it the app would reach the real
+        third-party and nothing would be recorded.
+        """
+        env: dict[str, str] = {}
+        for observer in self._proxy_observers(label):
+            _host, port = observer.address
+            env[_outbound_env_var(observer.service.name)] = f"http://{_DOCKER_HOST_GATEWAY}:{port}"
+        return env
+
+    def _safe_stop_proxy(self, observer: ProxyObserver) -> None:
+        try:
+            observer.stop()
+        except Exception as exc:  # noqa: BLE001 - cleanup must not mask the real failure
+            log.warning("failed to stop proxy", service=observer.service.name, error=str(exc))
+
     # -- app images and containers -------------------------------------------
 
     def _start_app(self, label: str, ref: str) -> tuple[Container, int]:
@@ -293,7 +386,10 @@ class Orchestrator:
         return container, host_port
 
     def _app_environment(self, label: str) -> dict[str, str]:
-        """Point one version's app at the Postgres instance reserved for it."""
+        """Point one version's app at the Postgres and proxies reserved for it."""
+        return {**self._postgres_environment(label), **self._outbound_environment(label)}
+
+    def _postgres_environment(self, label: str) -> dict[str, str]:
         if self.manifest.database is None:
             return {}
         container, _host_port = self._postgres_handles(label)

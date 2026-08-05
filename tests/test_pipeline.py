@@ -20,6 +20,7 @@ from ai.workflow_gen import ProposedWorkflow, WorkflowProposal
 from engine import pipeline as pipeline_module
 from engine.comparator import ComparisonMetadata, ComparisonResult, Finding, NoiseSummary
 from engine.manifest import Manifest, parse_manifest
+from engine.observers.proxy import OutboundCall
 from engine.orchestrator import OrchestratorError, RunHandles
 from engine.pipeline import RunEvent, run_pipeline
 from engine.runner import ResponseCapture, RunnerError, StepResult, WorkflowResult
@@ -249,6 +250,77 @@ def test_a_manifest_without_a_database_reports_nothing_skipped(patched: _Patched
     events = list(run_pipeline(_manifest()))
 
     assert "postgres_observation_skipped" not in _stages(events)
+
+
+# -- outbound calls ----------------------------------------------------------
+
+
+def _proxy(service_name: str, calls: list[tuple[str, str]]) -> MagicMock:
+    """A stopped proxy that has already recorded the given (method, path) calls."""
+    proxy = MagicMock()
+    proxy.service.name = service_name
+    proxy.calls = [OutboundCall(method=method, path=path) for method, path in calls]
+    return proxy
+
+
+def test_outbound_calls_recorded_by_the_proxies_reach_the_comparator(patched: _Patched) -> None:
+    handles = _handles()
+    handles.base_proxy_observers = [_proxy("payments", [("POST", "/v1/authorize"), ("POST", "/v1/capture")])]
+    handles.target_proxy_observers = [_proxy("payments", [("POST", "/v1/authorize")])]
+    patched.orchestrator.start.return_value = handles
+
+    events = list(run_pipeline(_manifest()))
+
+    diff = patched.compare.call_args.kwargs["outbound_diff"]
+    assert [call.path for call in diff.in_both] == ["/v1/authorize"]
+    assert [call.path for call in diff.only_in_base] == ["/v1/capture"]
+    assert diff.only_in_target == []
+
+    observed = _only(events, "observing_outbound")
+    assert observed.data["services"] == ["payments"]
+    assert observed.data["only_in_base"] == 1
+
+
+def test_every_outbound_service_is_diffed_into_one_result(patched: _Patched) -> None:
+    handles = _handles()
+    handles.base_proxy_observers = [
+        _proxy("payments", [("POST", "/v1/authorize")]),
+        _proxy("shipping", []),
+    ]
+    handles.target_proxy_observers = [
+        _proxy("payments", []),
+        _proxy("shipping", [("GET", "/rates")]),
+    ]
+    patched.orchestrator.start.return_value = handles
+
+    list(run_pipeline(_manifest()))
+
+    diff = patched.compare.call_args.kwargs["outbound_diff"]
+    assert [call.path for call in diff.only_in_base] == ["/v1/authorize"]
+    assert [call.path for call in diff.only_in_target] == ["/rates"]
+
+
+def test_a_run_without_proxies_compares_no_outbound_calls(patched: _Patched) -> None:
+    events = list(run_pipeline(_manifest()))
+
+    # None, not an empty diff: nothing was observed, which is not the same as
+    # having observed that neither version called out.
+    assert patched.compare.call_args.kwargs["outbound_diff"] is None
+    assert "observing_outbound" not in _stages(events)
+
+
+def test_unpaired_proxies_fail_the_run(patched: _Patched) -> None:
+    handles = _handles()
+    handles.base_proxy_observers = [_proxy("payments", []), _proxy("shipping", [])]
+    handles.target_proxy_observers = [_proxy("payments", [])]
+    patched.orchestrator.start.return_value = handles
+
+    events = list(run_pipeline(_manifest()))
+
+    error = _only(events, "error")
+    assert "not paired" in error.data["error"]
+    assert error.data["expected"] is False
+    patched.compare.assert_not_called()
 
 
 # -- the done event ----------------------------------------------------------

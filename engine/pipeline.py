@@ -16,6 +16,8 @@ Stages, in the order a successful run yields them:
     workflow_completed           that workflow finished
     workflows_complete           every workflow has run
     observing_http               structuring and diffing HTTP observations
+    observing_outbound           diffing recorded outbound calls (only when
+                                 outbound proxies ran)
     comparing                    turning observer diffs into findings
     classifying                  advisory AI layer (only when a diff is given)
     persisting                   writing the run to the store
@@ -55,6 +57,7 @@ from engine.comparator import compare
 from engine.manifest import Manifest
 from engine.observers.http import HttpObserver
 from engine.observers.postgres import PostgresObserver
+from engine.observers.proxy import OutboundCallDiff, ProxyObserver
 from engine.orchestrator import Orchestrator, OrchestratorError, RunHandles
 from engine.runner import RunnerError, run_workflows
 from web.store import save_run
@@ -254,9 +257,20 @@ def run_pipeline(
             target_delta = PostgresObserver.diff(target_pg_before, target_pg_after)
             pg_diff = PostgresObserver.compare_deltas(base_delta, target_delta, config=manifest.normalize)
 
-        # Observe outbound calls
-        outbound_diff = None
-        # TODO: wire proxy observer once proxy is started by orchestrator
+        # Observe outbound calls. One proxy pair per manifest outbound service,
+        # paired positionally; compare() takes a single diff, so the per-service
+        # diffs are concatenated into one.
+        outbound_diff = _outbound_diff(handles)
+        if outbound_diff is not None:
+            yield emit(
+                "observing_outbound",
+                f"Comparing {len(handles.base_proxy_observers)} outbound service(s)",
+                {
+                    "services": [o.service.name for o in handles.base_proxy_observers],
+                    "only_in_base": len(outbound_diff.only_in_base),
+                    "only_in_target": len(outbound_diff.only_in_target),
+                },
+            )
 
         duration = time.monotonic() - start
 
@@ -333,6 +347,36 @@ def run_pipeline(
     finally:
         if orchestrator:
             orchestrator.cleanup()
+
+
+def _outbound_diff(handles: RunHandles) -> OutboundCallDiff | None:
+    """Diff each service's base proxy against its target proxy, merged into one.
+
+    Returns None when no proxies ran — a manifest without outbound services, or
+    a direct-attach run, has nothing to compare, which is different from having
+    compared and found no calls.
+
+    The two lists are paired positionally, as the orchestrator builds them. A
+    mismatch in length would mean the pair no longer describes the same service,
+    so it fails rather than silently comparing the wrong ones.
+    """
+    base_observers = handles.base_proxy_observers
+    target_observers = handles.target_proxy_observers
+    if not base_observers and not target_observers:
+        return None
+    if len(base_observers) != len(target_observers):
+        raise ValueError(
+            "proxy observers are not paired: "
+            f"{len(base_observers)} for base, {len(target_observers)} for target"
+        )
+
+    merged = OutboundCallDiff()
+    for base_observer, target_observer in zip(base_observers, target_observers):
+        diff = ProxyObserver.diff(base_observer.calls, target_observer.calls)
+        merged.in_both.extend(diff.in_both)
+        merged.only_in_base.extend(diff.only_in_base)
+        merged.only_in_target.extend(diff.only_in_target)
+    return merged
 
 
 def _error_event(exc: Exception) -> RunEvent:

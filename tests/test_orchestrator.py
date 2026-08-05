@@ -16,6 +16,7 @@ import yaml
 
 from engine import orchestrator as orch_module
 from engine.manifest import Manifest, load_manifest, parse_manifest
+from engine.observers.proxy import ProxyObserverError
 from engine.orchestrator import Orchestrator, OrchestratorError, RunHandles
 
 
@@ -433,6 +434,110 @@ class TestSeedResolution:
 
         assert manifest.source_path is None
         assert manifest.seed_path == (tmp_path / "seed.sql").resolve()
+
+
+class TestOutboundProxies:
+    """Each version's outbound calls go to a proxy of its own, and are recorded there."""
+
+    def _manifest_with_outbound(self) -> Manifest:
+        data = _manifest_dict(with_database=False)
+        data["outbound"] = {
+            "services": [
+                {
+                    "name": "payment-provider",
+                    "base_url": "https://api.payments.example.com",
+                    "mock_responses": {"POST /v1/authorize": {"status": 200, "body": {"ok": True}}},
+                }
+            ]
+        }
+        return parse_manifest(data)
+
+    def _start(self, manifest: Manifest, monkeypatch: pytest.MonkeyPatch) -> tuple[Orchestrator, MagicMock]:
+        client = _make_client(
+            [
+                _make_container("base", 8000, 18000),
+                _make_container("target", 8000, 18001),
+            ]
+        )
+        orch = Orchestrator(manifest, docker_client=client)
+        monkeypatch.setattr(orch_module.subprocess, "run", MagicMock(return_value=MagicMock(returncode=0)))
+        monkeypatch.setattr(orch_module.httpx, "get", MagicMock(return_value=MagicMock(status_code=200)))
+        _quiet_waits(monkeypatch)
+        return orch, client
+
+    def test_each_version_gets_its_own_proxy(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        orch, _client = self._start(self._manifest_with_outbound(), monkeypatch)
+        try:
+            handles = orch.start()
+
+            assert len(handles.base_proxy_observers) == 1
+            assert len(handles.target_proxy_observers) == 1
+            base_proxy = handles.base_proxy_observers[0]
+            target_proxy = handles.target_proxy_observers[0]
+            assert base_proxy.service.name == "payment-provider"
+            # Separate ports: a shared proxy could not attribute a recorded
+            # call to the version that made it.
+            assert base_proxy.address[1] != target_proxy.address[1]
+        finally:
+            orch.cleanup()
+
+    def test_each_app_is_pointed_at_its_own_proxy(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        orch, client = self._start(self._manifest_with_outbound(), monkeypatch)
+        try:
+            handles = orch.start()
+
+            base_env = client.containers.run.call_args_list[0].kwargs["environment"]
+            target_env = client.containers.run.call_args_list[1].kwargs["environment"]
+            var = "OUTBOUND_PAYMENT_PROVIDER_URL"
+
+            base_port = handles.base_proxy_observers[0].address[1]
+            target_port = handles.target_proxy_observers[0].address[1]
+            assert base_env[var] == f"http://host.docker.internal:{base_port}"
+            assert target_env[var] == f"http://host.docker.internal:{target_port}"
+        finally:
+            orch.cleanup()
+
+    def test_no_outbound_config_starts_no_proxies(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        orch, client = self._start(_manifest(with_database=False), monkeypatch)
+        try:
+            handles = orch.start()
+
+            assert handles.base_proxy_observers == []
+            assert handles.target_proxy_observers == []
+            env = client.containers.run.call_args_list[0].kwargs["environment"]
+            assert not [key for key in env if key.startswith("OUTBOUND_")]
+        finally:
+            orch.cleanup()
+
+    def test_cleanup_stops_every_proxy(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        orch, _client = self._start(self._manifest_with_outbound(), monkeypatch)
+        handles = orch.start()
+        proxies = [*handles.base_proxy_observers, *handles.target_proxy_observers]
+
+        orch.cleanup()
+
+        for proxy in proxies:
+            # address raises once the server is closed, which is how a stopped
+            # proxy is observable from outside.
+            with pytest.raises(ProxyObserverError):
+                proxy.address
+
+    def test_cleanup_tolerates_a_proxy_that_fails_to_stop(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        manifest = _manifest(with_database=False)
+        orch = Orchestrator(manifest, docker_client=_make_client([]))
+
+        broken = MagicMock()
+        broken.service.name = "payment-provider"
+        broken.stop.side_effect = OSError("socket already closed")
+        healthy = MagicMock()
+        healthy.service.name = "payment-provider"
+        orch._base_proxy_observers = [broken]
+        orch._target_proxy_observers = [healthy]
+
+        orch.cleanup()
+
+        healthy.stop.assert_called_once()
+        assert orch._base_proxy_observers == []
 
 
 class TestCleanup:
