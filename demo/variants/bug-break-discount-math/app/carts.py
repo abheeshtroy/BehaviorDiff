@@ -1,7 +1,7 @@
 """Cart routes: create a cart, apply a discount code.
 
-Every scenario runs through these two routes; the pricing they do is what the
-bug/hardcode-cart-total and bug/break-discount-math branches change.
+The discount rate lives in one constant so the promotion can be retuned in a
+single place.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from app.db import connect
 router = APIRouter()
 
 ITEM_PRICE_CENTS = 4500
-DISCOUNT_MULTIPLIER = 0.9
+DISCOUNT_MULTIPLIER = 0.5
 
 
 class CreateCartRequest(BaseModel):

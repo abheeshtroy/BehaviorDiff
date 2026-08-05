@@ -89,6 +89,63 @@ SCENARIOS = (
             "the amount as a number."
         ),
     ),
+    # The bug/ branches are the benchmark set: each seeds exactly one regression
+    # on the HTTP surface, and the matching demo/manifests/benchNN-*.yaml is the
+    # run that should find it. Their commit messages read like the change was
+    # meant, which is the point — a message that announced the regression would
+    # tell the classifier the answer.
+    Scenario(
+        branch="bug/wrong-error-code",
+        overlay="bug-wrong-error-code",
+        subject="checkout: answer a missing cart with an error document",
+        body=(
+            "Callers had to handle a 404 body and a success body differently. "
+            "Return the error in the response document instead so there is one "
+            "shape to parse."
+        ),
+    ),
+    Scenario(
+        branch="bug/drop-total-from-response",
+        overlay="bug-drop-total-from-response",
+        subject="checkout: return the order's identity, not its amount",
+        body=(
+            "The amount is already on GET /api/orders/{id}, which is the authority "
+            "on it. Drop it from the checkout response so the two cannot disagree."
+        ),
+    ),
+    Scenario(
+        branch="bug/wrong-content-type",
+        overlay="bug-wrong-content-type",
+        subject="orders: render an order as key=value text",
+        body=(
+            "The order-label printer reads GET /api/orders/{id} and has no JSON "
+            "parser. Render the order as a flat line of key=value pairs."
+        ),
+    ),
+    Scenario(
+        branch="bug/swallow-not-found",
+        overlay="bug-swallow-not-found",
+        subject="fulfillment: report zero jobs for an order that is gone",
+        body=(
+            "A batch of fulfill calls died on the first order that had been "
+            "cancelled. Report that nothing was scheduled instead of failing."
+        ),
+    ),
+    Scenario(
+        branch="bug/hardcode-cart-total",
+        overlay="bug-hardcode-cart-total",
+        subject="carts: price the cart on discount and checkout, not on create",
+        body=(
+            "Creating a cart priced the items, then discount and checkout priced "
+            "them again. Start a new cart at zero and price it once, later."
+        ),
+    ),
+    Scenario(
+        branch="bug/break-discount-math",
+        overlay="bug-break-discount-math",
+        subject="carts: retune the discount rate",
+        body="Move DISCOUNT_MULTIPLIER to the rate the current promotion runs at.",
+    ),
 )
 
 

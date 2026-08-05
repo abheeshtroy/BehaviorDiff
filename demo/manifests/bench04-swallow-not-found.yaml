@@ -1,0 +1,40 @@
+# Benchmark regression 04: fulfilling a missing order answers 200 {"scheduled": 0}.
+#
+# An HTTP-surface test. The app needs Postgres to serve any route at all, so
+# the database is configured — but neither version queues a job for an order
+# that does not exist, so the observed table stays empty on both sides and the
+# compared surface is HTTP alone.
+app:
+  name: shop-api
+  start: uvicorn app.main:app --host 0.0.0.0 --port 8000
+  port: 8000
+  healthcheck: /health
+  dockerfile: Dockerfile
+
+database:
+  type: postgres
+  seed: seed.sql
+  observe_tables:
+    - jobs      # empty on both sides: HTTP is the surface under test
+
+compare:
+  base_ref: main
+  target_ref: bug/swallow-not-found
+  repo: ../.demo-repo  # relative to this manifest; built by demo/build_demo_repo.py
+
+workflows:
+  - name: fulfill-an-order-that-does-not-exist
+    steps:
+      - method: POST
+        path: /api/orders/nonexistent-id/fulfill
+
+normalize:
+  ignore_fields:
+    - "*.created_at"
+    - "*.updated_at"
+    - "headers.date"      # response clock, not behaviour
+  uuid_fields:
+    - "*.cart_id"
+    - "*.order_id"
+    - "*.id"
+  numeric_tolerance: 0.001

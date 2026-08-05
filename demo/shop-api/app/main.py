@@ -3,9 +3,15 @@
 This tree is the `main` version. Each scenario branch of the generated demo
 repository (demo/build_demo_repo.py) changes exactly one module of it:
 
-    fix/checkout-validation   app/checkout.py
-    fix/retry-logic           app/fulfillment.py
-    fix/response-cleanup      app/orders.py
+    fix/checkout-validation      app/checkout.py
+    fix/retry-logic              app/fulfillment.py
+    fix/response-cleanup         app/orders.py
+    bug/wrong-error-code         app/checkout.py
+    bug/drop-total-from-response app/checkout.py
+    bug/wrong-content-type       app/orders.py
+    bug/swallow-not-found        app/fulfillment.py
+    bug/hardcode-cart-total      app/carts.py
+    bug/break-discount-math      app/carts.py
 """
 
 from __future__ import annotations

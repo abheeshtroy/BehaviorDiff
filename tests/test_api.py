@@ -159,13 +159,20 @@ def test_list_manifests_returns_the_demo_manifests_with_metadata():
     assert resp.status_code == 200
 
     manifests = resp.json()
-    assert len(manifests) == 3
+    assert len(manifests) == 9
 
     by_filename = {entry["filename"]: entry for entry in manifests}
     assert set(by_filename) == {
         "scenario1-checkout-validation.yaml",
         "scenario2-retry-logic.yaml",
         "scenario3-response-cleanup.yaml",
+        # The seeded-regression benchmark set.
+        "bench01-wrong-error-code.yaml",
+        "bench02-drop-total.yaml",
+        "bench03-wrong-content-type.yaml",
+        "bench04-swallow-not-found.yaml",
+        "bench05-hardcode-total.yaml",
+        "bench06-discount-math.yaml",
     }
 
     scenario1 = by_filename["scenario1-checkout-validation.yaml"]

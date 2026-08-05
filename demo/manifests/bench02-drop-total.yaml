@@ -1,0 +1,44 @@
+# Benchmark regression 02: the checkout response drops its `total` field.
+#
+# An HTTP-surface test. Checkout writes to orders and payment_calls, so the
+# database is configured — but the observed table (jobs) is one no step in this
+# workflow writes, which keeps the compared surface to HTTP alone.
+app:
+  name: shop-api
+  start: uvicorn app.main:app --host 0.0.0.0 --port 8000
+  port: 8000
+  healthcheck: /health
+  dockerfile: Dockerfile
+
+database:
+  type: postgres
+  seed: seed.sql
+  observe_tables:
+    - jobs      # untouched by this workflow: HTTP is the surface under test
+
+compare:
+  base_ref: main
+  target_ref: bug/drop-total-from-response
+  repo: ../.demo-repo  # relative to this manifest; built by demo/build_demo_repo.py
+
+workflows:
+  - name: checkout-a-valid-cart
+    steps:
+      - method: POST
+        path: /api/carts
+        body: {"items": [{"sku": "SHOE-42", "qty": 1}]}
+        capture: {"cart_id": "$.cart_id"}
+      - method: POST
+        path: /api/checkout
+        body: {"cart_id": "{cart_id}", "address": {"street": "123 Main", "city": "SF", "zip": "94102"}}
+
+normalize:
+  ignore_fields:
+    - "*.created_at"
+    - "*.updated_at"
+    - "headers.date"      # response clock, not behaviour
+  uuid_fields:
+    - "*.cart_id"
+    - "*.order_id"
+    - "*.id"
+  numeric_tolerance: 0.001

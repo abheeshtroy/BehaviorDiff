@@ -1,7 +1,7 @@
 """Cart routes: create a cart, apply a discount code.
 
-Every scenario runs through these two routes; the pricing they do is what the
-bug/hardcode-cart-total and bug/break-discount-math branches change.
+A new cart starts at zero and is priced when a discount is applied or at
+checkout, so the line items only have to be priced once.
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ class ApplyDiscountRequest(BaseModel):
 @router.post("/api/carts")
 def create_cart(req: CreateCartRequest):
     cart_id = str(uuid.uuid4())
-    total = sum(item.get("qty", 1) * ITEM_PRICE_CENTS for item in req.items)
+    total = 0
     with connect() as conn:
         conn.execute(
             "INSERT INTO carts (id, items, total, discount_code) VALUES (%s, %s, %s, NULL)",
