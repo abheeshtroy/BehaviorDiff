@@ -4,6 +4,7 @@ import { SCENARIOS } from "../demoData";
 import DemoBackground from "../components/DemoBackground";
 import OrientationPanel from "../components/OrientationPanel";
 import StateNotice from "../components/StateNotice";
+import { beatFor } from "../lib/orientation";
 
 const PHASES = [
   "starting containers",
@@ -164,7 +165,7 @@ export default function DemoRun() {
       <DemoBackground diverged={diverged} />
       <Link to="/runs/new" className="back-link">← Back to scenarios</Link>
 
-      {stage === "orient" && <OrientationPanel onContinue={() => setStage("review")} />}
+      {stage === "orient" && <OrientationPanel beat={beatFor(s)} onContinue={() => setStage("review")} />}
 
       {stage === "review" && (
         <div className="demo-pane">

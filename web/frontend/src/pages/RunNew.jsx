@@ -5,6 +5,7 @@ import DemoBackground from "../components/DemoBackground";
 import OrientationPanel from "../components/OrientationPanel";
 import StateNotice from "../components/StateNotice";
 import { scenarioForManifest, watchLine } from "../lib/scenarios";
+import { beatFor } from "../lib/orientation";
 import { noteRunFailure, realRunsAvailable } from "../lib/runMode";
 import { hasDiverged } from "../lib/stream";
 import { phaseStates } from "../lib/phases";
@@ -184,7 +185,7 @@ function ComparisonPicker({ manifests, error, selectedManifest, canRunReal, onRu
       {/* Honesty, kept quiet: a walkthrough is a recorded run, not a
           simulation, and it is the path this page is built around. */}
       <div className="picker-note">
-        A walkthrough replays a recorded run — real findings, real evidence.
+        A walkthrough replays a recorded run, real findings, real evidence.
         {canRunReal && " Running one live needs Docker and takes about a minute."}
       </div>
 
@@ -376,6 +377,7 @@ export default function RunNew() {
         </button>
 
         <OrientationPanel
+          beat={beatFor(scenario)}
           onContinue={() => start(orienting)}
           continueLabel="Start the run →"
         />

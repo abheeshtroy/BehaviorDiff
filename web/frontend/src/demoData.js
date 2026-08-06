@@ -18,6 +18,16 @@ const SCRIPTS = {
       { n: 45, type: "add", text: "    charge(cart.total)" },
     ],
     checks: ["47 tests passing", "94% coverage", "lint clean"],
+    // Prose for the orientation beat that runs before this scenario. Only the
+    // words are here — the pull request header, the check list and the list of
+    // what actually changed are derived from the fields above by beatFor() in
+    // lib/orientation.js.
+    orientation: {
+      approvals: 2,
+      headline: "Every check was green. Two bugs shipped anyway.",
+      sub: "A four-line checkout fix also wiped customer discounts and charged the card on orders it rejected. The diff didn't say so. CI didn't catch it.",
+      caption: "Only one of those three was in the pull request description.",
+    },
     steps: ["cart", "discount", "submit", "charge", "order"],
     divergeAt: 2,
     workflows: 6,
@@ -85,6 +95,12 @@ const SCRIPTS = {
       { n: 92, type: "add", text: "        return _fulfill(order_id)" },
     ],
     checks: ["31 tests passing", "89% coverage", "lint clean"],
+    orientation: {
+      approvals: 1,
+      headline: "Every check was green. Every job now runs twice.",
+      sub: "Moving retry scheduling into a decorator left the old call site scheduling too. Both fire. The diff reads like a cleanup; the run enqueues every job twice and emails the customer about it.",
+      caption: "Neither of those two was in the pull request description.",
+    },
     steps: ["order", "fulfill", "retry", "notify", "close"],
     divergeAt: 2,
     workflows: 4,
@@ -129,6 +145,12 @@ const SCRIPTS = {
       { n: 25, type: "add", text: "    total: float" },
     ],
     checks: ["52 tests passing", "96% coverage", "lint clean"],
+    orientation: {
+      approvals: 3,
+      headline: "Every check was green. A rename changed the number.",
+      sub: "Renaming total_cents to total also changed the unit and the type: 2999 became 29.99. Every consumer still reading the old field now reads a different amount, in a different scale.",
+      caption: "The pull request called it a rename. Nothing in it mentions the unit.",
+    },
     steps: ["cart", "submit", "order", "fetch", "render"],
     divergeAt: 3,
     workflows: 5,
