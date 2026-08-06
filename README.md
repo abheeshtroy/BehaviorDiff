@@ -134,7 +134,20 @@ cd demo && docker compose up -d
 Postgres instances (ports 55432, 55433), and a payment mock. `base` builds from
 `demo/shop-api`; `target` builds from `demo/.demo-build/fix-checkout-validation`,
 which step 2 also materializes — point it at another `.demo-build/fix-*`
-directory to compare a different scenario. Then:
+directory to compare a different scenario.
+
+After editing the demo app source or `demo/shop-api/seed.sql`, restart with:
+
+```bash
+cd demo && docker compose down -v && docker compose up --build
+```
+
+`down -v` drops the Postgres volumes — the seed only runs on an empty data
+directory, so without it the old database survives and your `seed.sql` edits are
+ignored. `--build` rebuilds the images so source changes are picked up. Skip
+either one and the containers come back up with the previous behavior, silently.
+
+Then:
 
 ```bash
 python cli.py demo/manifests/scenario1-checkout-validation.yaml \
