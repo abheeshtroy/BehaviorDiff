@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { SCENARIOS } from "../demoData";
+import BlastRadiusGrid from "../components/BlastRadiusGrid";
 import DemoBackground from "../components/DemoBackground";
 import OrientationPanel from "../components/OrientationPanel";
+import SequenceDiagram from "../components/SequenceDiagram";
 import StateNotice from "../components/StateNotice";
+import TimelineScrubber from "../components/TimelineScrubber";
 import { beatFor } from "../lib/orientation";
 
 const PHASES = [
@@ -13,6 +16,8 @@ const PHASES = [
   "comparing observations",
   "classifying findings",
 ];
+
+const TABS = ["findings", "sequence", "blast radius", "timeline"];
 
 const CAT_TAG = { http: "badge-blue", postgres: "badge-purple", outbound: "badge-orange", latency: "badge-muted" };
 const CAT_ACCENT = { http: "accent-http", postgres: "accent-postgres", outbound: "accent-outbound", latency: "accent-latency" };
@@ -27,6 +32,25 @@ function Json({ label, data, variant }) {
       <pre className="ev-pre">{JSON.stringify(data, null, 2)}</pre>
     </div>
   );
+}
+
+/**
+ * A scripted finding in the shape the visualization components read.
+ *
+ * The scenarios were written for the cards on this page (`workflow`, `step`,
+ * `base`, `target`); the sequence, blast radius and timeline views were written
+ * against the engine's finding model (`workflow_name`, `step_index`,
+ * `evidence_base`, `evidence_target`). Aliasing rather than renaming keeps both
+ * readers on the fields they already use, and leaves demoData.js alone.
+ */
+function asEngineFinding(f) {
+  return {
+    ...f,
+    workflow_name: f.workflow ?? null,
+    step_index: f.step ?? null,
+    evidence_base: f.base,
+    evidence_target: f.target,
+  };
 }
 
 function Finding({ f, index, visible, autoOpen }) {
@@ -84,6 +108,7 @@ export default function DemoRun() {
   const [shownFindings, setShownFindings] = useState(0);
   const [showNoise, setShowNoise] = useState(false);
   const [counts, setCounts] = useState({ w: 0, d: 0, s: 0 });
+  const [tab, setTab] = useState("findings");
   const timers = useRef([]);
 
   useEffect(() => () => timers.current.forEach(clearTimeout), []);
@@ -105,6 +130,10 @@ export default function DemoRun() {
   }
 
   const suspicious = s.findings.filter((f) => f.classification === "suspicious").length;
+  const viewFindings = s.findings.map(asEngineFinding);
+  // The scenario keeps one suppression total; the grid only ever reads the sum
+  // of the two counters a real noise summary carries.
+  const noiseSummary = { http_suppressed: s.suppressed, postgres_suppressed: 0 };
 
   function schedule(fn, ms) {
     timers.current.push(setTimeout(fn, ms));
@@ -157,7 +186,7 @@ export default function DemoRun() {
     timers.current = [];
     setStage("review"); setChoice(null); setPhase(0); setElapsed(0);
     setLitSteps(-1); setDiverged(false); setShownFindings(0);
-    setShowNoise(false); setCounts({ w: 0, d: 0, s: 0 });
+    setShowNoise(false); setCounts({ w: 0, d: 0, s: 0 }); setTab("findings");
   }
 
   return (
@@ -271,18 +300,49 @@ export default function DemoRun() {
             <div className="info-text">{s.assessment}</div>
           </div>
 
-          <div className="findings-bar">
-            <div className="findings-title">Findings <span className="findings-count">{s.findings.length}</span></div>
-            <span className="findings-sup">ran in {s.duration}</span>
-          </div>
-
-          {s.findings.map((f, i) => (
-            <Finding key={i} f={f} index={i} visible={i < shownFindings} autoOpen={i === 0} />
-          ))}
-
           <div className={`noise-card demo-noise ${showNoise ? "in" : ""}`}>
             ≡ {s.suppressed} differences normalized — ids, timestamps, row ordering
           </div>
+
+          {/* The same four views a real run gets, on the scripted run's own
+              events and findings — a visitor without Docker should still see
+              what the run detail page shows. */}
+          <div className="view-tabs">
+            {TABS.map((t) => (
+              <div
+                key={t}
+                className={`view-tab ${tab === t ? "active" : ""}`}
+                onClick={() => setTab(t)}
+              >
+                {t.charAt(0).toUpperCase() + t.slice(1)}
+              </div>
+            ))}
+          </div>
+
+          {tab === "findings" && (
+            <>
+              <div className="findings-bar">
+                <div className="findings-title">Findings <span className="findings-count">{s.findings.length}</span></div>
+                <span className="findings-sup">ran in {s.duration}</span>
+              </div>
+
+              {s.findings.map((f, i) => (
+                <Finding key={i} f={f} index={i} visible={i < shownFindings} autoOpen={i === 0} />
+              ))}
+            </>
+          )}
+
+          {tab === "sequence" && <SequenceDiagram events={s.events} findings={viewFindings} />}
+
+          {tab === "blast radius" && (
+            <BlastRadiusGrid
+              findings={viewFindings}
+              noiseSummary={noiseSummary}
+              totalWorkflows={s.workflows}
+            />
+          )}
+
+          {tab === "timeline" && <TimelineScrubber events={s.events} findings={viewFindings} />}
 
           <div className="results-actions">
             <button className="btn-pri" onClick={() => navigate("/runs/new")}>Try another scenario</button>
