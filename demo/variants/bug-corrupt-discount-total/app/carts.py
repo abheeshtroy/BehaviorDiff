@@ -1,8 +1,8 @@
 """Cart routes: create a cart, apply a discount code.
 
-Every scenario runs through these two routes; the pricing they do is what the
-bug/hardcode-cart-total, bug/break-discount-math and bug/corrupt-discount-total
-branches change.
+Applying a code records the code on the cart. The price it earns is worked out
+at checkout, so the cart holds one price and the discount is applied to it
+once.
 """
 
 from __future__ import annotations
@@ -46,9 +46,9 @@ def apply_discount(cart_id: str, req: ApplyDiscountRequest):
         row = conn.execute("SELECT total FROM carts WHERE id = %s", (cart_id,)).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Cart not found")
-        new_total = int(row[0] * DISCOUNT_MULTIPLIER)
+        total = row[0]
         conn.execute(
-            "UPDATE carts SET discount_code = %s, total = %s WHERE id = %s",
-            (req.code, new_total, cart_id),
+            "UPDATE carts SET discount_code = %s WHERE id = %s",
+            (req.code, cart_id),
         )
-    return {"discount_code": req.code, "total": new_total}
+    return {"discount_code": req.code, "total": total}

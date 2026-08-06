@@ -1,0 +1,45 @@
+# Benchmark regression 10: the order is written with a null cart_id.
+#
+# A Postgres-surface test. The checkout response never carried the cart_id, so
+# the stored row is the only place the link going missing shows.
+app:
+  name: shop-api
+  start: uvicorn app.main:app --host 0.0.0.0 --port 8000
+  port: 8000
+  healthcheck: /health
+  dockerfile: Dockerfile
+
+database:
+  type: postgres
+  seed: seed.sql
+  observe_tables:
+    - orders
+
+compare:
+  base_ref: main
+  target_ref: bug/orphan-order
+  repo: ../.demo-repo  # relative to this manifest; built by demo/build_demo_repo.py
+
+workflows:
+  - name: checkout-a-valid-cart
+    steps:
+      - method: POST
+        path: /api/carts
+        body: {"items": [{"sku": "SHOE-42", "qty": 1}]}
+        capture: {"cart_id": "$.cart_id"}
+      - method: POST
+        path: /api/checkout
+        body: {"cart_id": "{cart_id}", "address": {"street": "123 Main", "city": "SF", "zip": "94102"}}
+
+normalize:
+  ignore_fields:
+    - "*.created_at"
+    - "*.updated_at"
+    - "headers.date"      # response clock, not behaviour
+  uuid_fields:
+    - "*.cart_id"
+    - "*.order_id"
+    - "*.id"
+  numeric_tolerance: 0.001
+  ignore_row_order:
+    - orders

@@ -146,6 +146,53 @@ SCENARIOS = (
         subject="carts: retune the discount rate",
         body="Move DISCOUNT_MULTIPLIER to the rate the current promotion runs at.",
     ),
+    Scenario(
+        branch="bug/skip-payment-record",
+        overlay="bug-skip-payment-record",
+        subject="payment: stop copying authorizations into payment_calls",
+        body=(
+            "The provider is the ledger of record for an authorization, and the "
+            "local copy is a second place for the same fact to live. Drop the "
+            "insert and read authorizations from the provider."
+        ),
+    ),
+    Scenario(
+        branch="bug/wrong-order-status",
+        overlay="bug-wrong-order-status",
+        subject="checkout: write a new order as pending",
+        body=(
+            "An order was confirmed before anything had picked it up. Write it "
+            "as pending; fulfillment moves it to confirmed when it takes it."
+        ),
+    ),
+    Scenario(
+        branch="bug/double-fulfill-job",
+        overlay="bug-double-fulfill-job",
+        subject="fulfillment: queue the pick and the ship legs together",
+        body=(
+            "Shipping waited on picking to be enqueued before it could start. "
+            "Queue both legs up front so a free worker can take either."
+        ),
+    ),
+    Scenario(
+        branch="bug/orphan-order",
+        overlay="bug-orphan-order",
+        subject="checkout: let the order stand on its own",
+        body=(
+            "An order carries the amount it was placed for, so holding the cart "
+            "behind it only keeps a finished cart from being swept up. Write the "
+            "order without the back-reference."
+        ),
+    ),
+    Scenario(
+        branch="bug/corrupt-discount-total",
+        overlay="bug-corrupt-discount-total",
+        subject="carts: record the discount code, price it at checkout",
+        body=(
+            "Applying a code rewrote the cart's total, so a second code compounded "
+            "on the first. Record the code and let checkout price it once."
+        ),
+    ),
 )
 
 
