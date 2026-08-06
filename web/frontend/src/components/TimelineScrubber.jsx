@@ -65,7 +65,7 @@ export default function TimelineScrubber({ events = null, findings = [] }) {
   const [index, setIndex] = useState(0);
   const [dragging, setDragging] = useState(false);
 
-  const { marks, start, end, durationMs } = useMemo(
+  const { marks, start, end, durationMs, leadMs } = useMemo(
     () => buildTimeline(events, findings),
     [events, findings],
   );
@@ -157,9 +157,12 @@ export default function TimelineScrubber({ events = null, findings = [] }) {
 
   return (
     <div className={`tl-wrap ${dragging ? "tl-dragging" : ""}`}>
+      {/* Both ends read as offsets from the start of the run, the way the marks
+          do — the bar opens at the first mark, so its left edge is however long
+          standing the two versions up took, not zero. */}
       <div className="tl-axis">
-        <span>0ms</span>
-        <span>{formatDuration(durationMs)}</span>
+        <span>{formatDuration(leadMs)}</span>
+        <span>{formatDuration(leadMs + durationMs)}</span>
       </div>
 
       <div

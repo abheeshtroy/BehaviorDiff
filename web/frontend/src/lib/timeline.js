@@ -63,17 +63,26 @@ export function nearestEvent(cursorX, events, firstTimestamp, lastTimestamp, bar
  * The run as marks on a clock: the sequence rows, plus the bounds to place them
  * against.
  *
- * The bar spans the whole run — the first event to the last — not just the
- * steps worth a mark. Standing the two versions up is most of a real run's wall
- * time, and a bar that quietly dropped it would misstate when everything else
- * happened.
+ * The bar spans the first mark to the last, not the whole run. Standing the two
+ * versions up is most of a real run's wall time and carries no marks, so a bar
+ * that included it would squeeze every mark into a sliver at the right-hand end
+ * — dead space bought at the cost of the part worth scrubbing through.
+ *
+ * That lead time is still reported, as `leadMs`, so a view can say the run began
+ * before the bar does rather than imply the first mark was the start of it.
  */
 export function buildTimeline(events, findings = []) {
   const marks = buildSequence(events, findings);
-  if (marks.length === 0) return { marks: [], start: 0, end: 0, durationMs: 0 };
+  if (marks.length === 0) return { marks: [], start: 0, end: 0, durationMs: 0, leadMs: 0 };
 
-  const start = events[0].timestamp;
-  const end = Math.max(events[events.length - 1].timestamp, marks[marks.length - 1].timestamp);
+  const start = marks[0].timestamp;
+  const end = marks[marks.length - 1].timestamp;
 
-  return { marks, start, end, durationMs: (end - start) * 1000 };
+  return {
+    marks,
+    start,
+    end,
+    durationMs: (end - start) * 1000,
+    leadMs: Math.max(0, (start - events[0].timestamp) * 1000),
+  };
 }

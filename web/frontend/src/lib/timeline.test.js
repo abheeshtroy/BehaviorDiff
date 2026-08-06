@@ -107,22 +107,47 @@ describe("nearestEvent", () => {
 
 describe("buildTimeline", () => {
   it("has no marks and no span for a run with no recorded events", () => {
-    expect(buildTimeline(null)).toEqual({ marks: [], start: 0, end: 0, durationMs: 0 });
-    expect(buildTimeline([])).toEqual({ marks: [], start: 0, end: 0, durationMs: 0 });
+    expect(buildTimeline(null)).toEqual({ marks: [], start: 0, end: 0, durationMs: 0, leadMs: 0 });
+    expect(buildTimeline([])).toEqual({ marks: [], start: 0, end: 0, durationMs: 0, leadMs: 0 });
   });
 
   it("has no marks when the stream holds only infrastructure stages", () => {
     expect(buildTimeline([event("environments_starting", 0), event("persisting", 10)]).marks).toEqual([]);
   });
 
-  it("spans the whole run, not just the steps worth a mark", () => {
+  it("spans the marks, not the lead time before the first of them", () => {
     const { start, end, durationMs, marks } = buildTimeline(run(), []);
 
-    // Standing the versions up is 2s of a 3s run; the bar keeps that time.
-    expect(start).toBe(T0);
+    // Standing the versions up is 2s of this 3s run, and carries no marks; the
+    // bar opens at the first mark so that time cannot squash the rest of it.
+    expect(start).toBe(at(2000).timestamp);
     expect(end).toBe(at(3000).timestamp);
-    expect(durationMs).toBeCloseTo(3000, 6);
-    expect(positionForEvent(marks[0], start, end, 100)).toBeCloseTo(66.67, 1);
+    expect(durationMs).toBeCloseTo(1000, 6);
+    expect(positionForEvent(marks[0], start, end, 100)).toBe(0);
+  });
+
+  it("reports the lead time it left off the bar, so a view can still say it happened", () => {
+    expect(buildTimeline(run(), []).leadMs).toBeCloseTo(2000, 6);
+    // A run whose first event is already a mark led with nothing.
+    expect(buildTimeline([event("comparing", 0), event("done", 100)], []).leadMs).toBe(0);
+  });
+
+  it("spreads the marks across the bar rather than crowding them at one end", () => {
+    const { marks, start, end } = buildTimeline(run(), []);
+    const positions = marks.map((m) => positionForEvent(m, start, end, 100));
+
+    expect(positions[0]).toBe(0);
+    expect(positions[positions.length - 1]).toBe(100);
+    // The middle of the run lands in the middle of the bar, give or take.
+    expect(positions.some((p) => p > 25 && p < 75)).toBe(true);
+  });
+
+  it("ends on the last mark, not on the harness tidying up after it", () => {
+    const withTail = [...run(), event("persisting", 4000)];
+    const { end, durationMs } = buildTimeline(withTail, []);
+
+    expect(end).toBe(at(3000).timestamp);
+    expect(durationMs).toBeCloseTo(1000, 6);
   });
 
   it("marks the same steps the sequence view lists, in order", () => {
