@@ -1,0 +1,142 @@
+# The benchmark: what each seeded regression should make the engine report.
+#
+# Fourteen seeded regressions and three controls. Each case names a manifest,
+# a human label, and the findings the engine is expected to produce. Manifest
+# paths are relative to the repository root. Run it with:
+#
+#     python bench/eval.py            # every case
+#     python bench/eval.py --case 7   # one case, by the number in this file
+#
+# `expected` describes findings by surface and shape, never by exact field
+# values — the benchmark scores whether the engine noticed the right kind of
+# difference on the right surface, not how it worded the summary.
+#
+#   surface: http      type: status_change | body_change | header_change
+#   surface: postgres  type: row_inserted | row_deleted | row_modified
+#   surface: outbound  type: call_only_in_base | call_only_in_target
+#                          | call_body_differs
+#
+# One expected entry is matched by at most one finding and vice versa, so the
+# number of entries is the number of findings expected. A finding often carries
+# more than one shape (a status change usually changes the body too); it is
+# matched if *any* of its shapes is the one the entry names, so each case lists
+# the shape that is the point of the regression rather than every shape the
+# finding happens to have.
+#
+# Postgres polarity reads from base to target, the way the comparator writes
+# it: a row base wrote and target didn't is `row_deleted` (it is missing from
+# target), and a row only target wrote is `row_inserted`.
+
+cases:
+  # -- HTTP surface ------------------------------------------------------
+
+  - manifest: demo/manifests/bench01-wrong-error-code.yaml
+    label: "HTTP: missing cart answers 200 {error} instead of 404"
+    expected:
+      - surface: http
+        type: status_change
+
+  - manifest: demo/manifests/bench02-drop-total.yaml
+    label: "HTTP: checkout response drops its total field"
+    expected:
+      - surface: http
+        type: body_change
+
+  - manifest: demo/manifests/bench03-wrong-content-type.yaml
+    label: "HTTP: GET order renders text/plain instead of JSON"
+    expected:
+      - surface: http
+        type: body_change   # the same finding also reports content-type
+
+  - manifest: demo/manifests/bench04-swallow-not-found.yaml
+    label: "HTTP: fulfilling a missing order answers 200 {scheduled: 0}"
+    expected:
+      - surface: http
+        type: status_change
+
+  - manifest: demo/manifests/bench05-hardcode-total.yaml
+    label: "HTTP: a new cart is priced at 0 whatever it holds"
+    expected:
+      - surface: http
+        type: body_change
+
+  - manifest: demo/manifests/bench06-discount-math.yaml
+    label: "HTTP: discount takes half off instead of a tenth"
+    expected:
+      - surface: http
+        type: body_change
+
+  # -- Postgres surface --------------------------------------------------
+
+  - manifest: demo/manifests/bench07-skip-payment-record.yaml
+    label: "Postgres: authorization is never recorded in payment_calls"
+    expected:
+      - surface: postgres
+        type: row_deleted   # base wrote the row, target never did
+
+  - manifest: demo/manifests/bench08-wrong-order-status.yaml
+    label: "Postgres: the order is stored as pending, not confirmed"
+    expected:
+      - surface: postgres
+        type: row_modified
+
+  - manifest: demo/manifests/bench09-double-fulfill.yaml
+    label: "Postgres: fulfilling queues two jobs instead of one"
+    expected:
+      - surface: postgres
+        type: row_inserted  # the extra job only target queued
+
+  - manifest: demo/manifests/bench10-orphan-order.yaml
+    label: "Postgres: the order is written with a null cart_id"
+    expected:
+      - surface: postgres
+        type: row_modified
+
+  - manifest: demo/manifests/bench11-corrupt-discount.yaml
+    label: "Postgres + HTTP: the discount code is recorded but not priced"
+    expected:
+      - surface: postgres
+        type: row_modified  # the cart keeps its undiscounted total
+      - surface: http
+        type: body_change   # and the discount response reports it back
+
+  # -- Outbound surface --------------------------------------------------
+
+  - manifest: demo/manifests/bench12-skip-payment-auth.yaml
+    label: "Outbound: checkout never authorizes the payment"
+    expected:
+      - surface: outbound
+        type: call_only_in_base
+
+  - manifest: demo/manifests/bench13-double-payment-auth.yaml
+    label: "Outbound + Postgres: checkout authorizes the payment twice"
+    expected:
+      - surface: outbound
+        type: call_only_in_target  # the second, unmatched authorize
+      - surface: postgres
+        type: row_inserted         # authorize() records a row per attempt
+
+  - manifest: demo/manifests/bench14-wrong-payment-amount.yaml
+    label: "Outbound: the authorization is sent for an amount of 0"
+    expected:
+      # Calls are matched by method, path and body, so a body that changed is
+      # an unmatched call on each side rather than one paired difference: the
+      # amount base sent, and the 0 target sent in its place.
+      - surface: outbound
+        type: call_body_differs
+      - surface: outbound
+        type: call_body_differs
+
+  # -- Controls: the precision half of the score -------------------------
+
+  - manifest: demo/manifests/bench15-rename-var.yaml
+    label: "Control: a local variable is renamed, nothing else"
+    expected: []
+
+  - manifest: demo/manifests/bench16-add-logging.yaml
+    label: "Control: a line is logged to stdout, nothing else"
+    expected: []
+
+  - manifest: demo/manifests/bench17-reorder-imports.yaml
+    label: "Control: the imports are reordered, nothing else"
+    expected: []
