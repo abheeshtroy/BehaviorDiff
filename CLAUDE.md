@@ -91,6 +91,8 @@ outbound:
   services:
     - name: payment-provider
       base_url: https://api.payments.example.com
+      env_var: PAYMENT_URL  # optional; the env var this app reads for the
+                            # service's URL. Defaults to OUTBOUND_PAYMENT_PROVIDER_URL.
       mock_responses:
         POST /v1/authorize:
           status: 200

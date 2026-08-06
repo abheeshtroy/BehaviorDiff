@@ -336,14 +336,18 @@ class Orchestrator:
     def _outbound_environment(self, label: str) -> dict[str, str]:
         """Point one version's app at its own proxies instead of the real services.
 
-        The app is expected to read OUTBOUND_{SERVICE_NAME}_URL and send that
-        service's calls there; without it the app would reach the real
-        third-party and nothing would be recorded.
+        The app has to read the proxy's address from somewhere, or it reaches
+        the real third-party and nothing is recorded. A service that names its
+        `env_var` is read there — apps come with their own names for these and
+        the engine is in no position to rename them — and one that does not
+        falls back to OUTBOUND_{SERVICE_NAME}_URL.
         """
         env: dict[str, str] = {}
         for observer in self._proxy_observers(label):
             _host, port = observer.address
-            env[_outbound_env_var(observer.service.name)] = f"http://{_DOCKER_HOST_GATEWAY}:{port}"
+            service = observer.service
+            name = service.env_var or _outbound_env_var(service.name)
+            env[name] = f"http://{_DOCKER_HOST_GATEWAY}:{port}"
         return env
 
     def _safe_stop_proxy(self, observer: ProxyObserver) -> None:

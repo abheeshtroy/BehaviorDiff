@@ -497,6 +497,37 @@ class TestOutboundProxies:
         finally:
             orch.cleanup()
 
+    def test_a_service_naming_its_env_var_is_pointed_through_that_name(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The app under test already reads PAYMENT_URL; the derived name is one
+        # only an app written for BehaviorDiff would look at, so a service that
+        # names its variable has to win.
+        data = _manifest_dict(with_database=False)
+        data["outbound"] = {
+            "services": [
+                {
+                    "name": "payment-provider",
+                    "base_url": "https://api.payments.example.com",
+                    "env_var": "PAYMENT_URL",
+                }
+            ]
+        }
+        orch, client = self._start(parse_manifest(data), monkeypatch)
+        try:
+            handles = orch.start()
+
+            base_env = client.containers.run.call_args_list[0].kwargs["environment"]
+            target_env = client.containers.run.call_args_list[1].kwargs["environment"]
+
+            base_port = handles.base_proxy_observers[0].address[1]
+            target_port = handles.target_proxy_observers[0].address[1]
+            assert base_env["PAYMENT_URL"] == f"http://host.docker.internal:{base_port}"
+            assert target_env["PAYMENT_URL"] == f"http://host.docker.internal:{target_port}"
+            assert "OUTBOUND_PAYMENT_PROVIDER_URL" not in base_env
+        finally:
+            orch.cleanup()
+
     def test_no_outbound_config_starts_no_proxies(self, monkeypatch: pytest.MonkeyPatch) -> None:
         orch, client = self._start(_manifest(with_database=False), monkeypatch)
         try:

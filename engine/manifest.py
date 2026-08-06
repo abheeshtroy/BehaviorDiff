@@ -79,6 +79,11 @@ class MockResponse(StrictModel):
 class OutboundService(StrictModel):
     name: str
     base_url: str
+    # The env var this app already reads for the service's URL — PAYMENT_URL,
+    # STRIPE_BASE, whatever it happens to be. Left unset, the orchestrator
+    # falls back to a name derived from the service name, which only an app
+    # written against BehaviorDiff would read.
+    env_var: str | None = None
     mock_responses: dict[str, MockResponse] = Field(default_factory=dict)
 
     @field_validator("name")
