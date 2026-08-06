@@ -204,6 +204,19 @@ For frontend work, `cd web/frontend && npm run dev` puts Vite on 5173 with
 `/api` proxied to 8100 — including the WebSocket upgrade, so the live run
 stream works in dev too. Keep uvicorn running alongside it.
 
+### Deploying it without the API
+
+The dashboard also builds as a plain static site: `web/frontend` is a complete
+Vercel project (set the project's root directory to it — that is where Vercel
+reads `vercel.json`, which rewrites every route to `index.html` for the SPA
+router). The demo scenarios need no API — they ship inside the bundle.
+
+Without a run server, `/runs/new` falls back to the scripted scenarios and
+offers only the walkthroughs — triggering a run and browsing stored runs need a
+local install, and those pages say so instead of failing. The frontend detects
+this at runtime, not at build time: a static host answers `/api/*` with
+`index.html` and a 200, so anything that isn't JSON counts as "no API here".
+
 ### What's in it
 
 **Landing page with interactive demo scenarios.** Scripted walkthroughs of the

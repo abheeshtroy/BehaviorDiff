@@ -1,4 +1,8 @@
-import { SCENARIOS } from "../demoData";
+import { SCENARIOS, SCENARIO_LIST } from "../demoData";
+
+// Where the demo manifests live in the repo. Only ever shown as a label here:
+// the static build has nothing to trigger them with.
+const MANIFEST_DIR = "demo/manifests";
 
 const CATEGORY_SURFACE = {
   http: "HTTP responses",
@@ -18,6 +22,25 @@ export function scenarioForManifest(pathOrFilename) {
   if (!pathOrFilename) return null;
   const filename = String(pathOrFilename).split("/").pop();
   return Object.values(SCENARIOS).find((s) => s.manifest === filename) ?? null;
+}
+
+/**
+ * The scripted scenarios in the shape /api/manifests returns.
+ *
+ * Used when there is no run server to ask — the static deployment, or a local
+ * one with the API down. The walkthroughs are bundled with the page, so the
+ * picker can still list every comparison it knows how to narrate; it just
+ * can't offer to run one. Nothing here is triggerable, so `path` is the file a
+ * visitor who clones the repo would run, not a target this page can POST.
+ */
+export function scenarioManifests() {
+  return SCENARIO_LIST.map((scenario) => ({
+    path: `${MANIFEST_DIR}/${scenario.manifest}`,
+    filename: scenario.manifest,
+    app_name: null,
+    workflow_count: scenario.workflows ?? null,
+    error: null,
+  }));
 }
 
 /**

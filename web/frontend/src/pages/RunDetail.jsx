@@ -76,7 +76,7 @@ export default function RunDetail() {
   useEffect(() => {
     fetchRun(runId)
       .then(setRun)
-      .catch((e) => setError(e.message))
+      .catch(setError)
       .finally(() => setLoading(false));
   }, [runId]);
 
@@ -89,6 +89,30 @@ export default function RunDetail() {
     );
   }
 
+  // No run server behind this page — the static deployment. A stored run only
+  // exists on the machine that produced it, so there is nothing to show and
+  // nothing to retry; say that plainly and point at what does work here.
+  if (error?.offline) {
+    return (
+      <div className="demo-page">
+        <DemoBackground diverged={false} />
+        <Link to="/runs/new" className="back-link">← Back to scenarios</Link>
+        <StateNotice
+          variant="notfound"
+          title="This page requires a local BehaviorDiff installation"
+          detail={
+            <>
+              Stored runs live on the machine that ran them, so <code>{runId}</code> can't be
+              opened here. The walkthroughs are bundled with this page and work as they are.
+            </>
+          }
+        >
+          <Link to="/runs/new" className="btn-sec act-link">Pick a comparison</Link>
+        </StateNotice>
+      </div>
+    );
+  }
+
   if (error || !run) {
     return (
       <div className="demo-page">
@@ -97,7 +121,7 @@ export default function RunDetail() {
         <StateNotice
           variant={error ? "error" : "notfound"}
           title={error ? "Could not load this run" : "That run does not exist"}
-          detail={error || `No run is stored with id ${runId}.`}
+          detail={error ? error.message : `No run is stored with id ${runId}.`}
         >
           <Link to="/runs" className="btn-sec act-link">All runs</Link>
         </StateNotice>

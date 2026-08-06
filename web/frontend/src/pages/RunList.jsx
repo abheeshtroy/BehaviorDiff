@@ -12,7 +12,7 @@ export default function RunList() {
   useEffect(() => {
     fetchRuns()
       .then(setRuns)
-      .catch((e) => setError(e.message))
+      .catch(setError)
       .finally(() => setLoading(false));
   }, []);
 
@@ -26,11 +26,28 @@ export default function RunList() {
     );
   }
 
+  // Reachable from the topbar on the static deployment, where there is no run
+  // server and never will be. Not an error there — just the wrong page.
+  if (error?.offline) {
+    return (
+      <div className="demo-page">
+        <DemoBackground diverged={false} />
+        <StateNotice
+          variant="notfound"
+          title="This page requires a local BehaviorDiff installation"
+          detail="Runs are stored by the machine that ran them. The walkthroughs are bundled with this page and work as they are."
+        >
+          <Link to="/runs/new" className="btn-sec act-link">Pick a comparison</Link>
+        </StateNotice>
+      </div>
+    );
+  }
+
   if (error) {
     return (
       <div className="demo-page">
         <DemoBackground diverged={false} />
-        <StateNotice variant="error" title="Could not reach the run server" detail={error}>
+        <StateNotice variant="error" title="Could not reach the run server" detail={error.message}>
           <Link to="/runs/new" className="btn-sec act-link">Back to scenarios</Link>
         </StateNotice>
       </div>

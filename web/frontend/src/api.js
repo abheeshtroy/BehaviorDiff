@@ -1,33 +1,64 @@
-export async function fetchRuns(limit = 50) {
-  const resp = await fetch(`/api/runs?limit=${limit}`);
-  if (!resp.ok) throw new Error(`Failed to fetch runs: ${resp.status}`);
-  return resp.json();
+import { ApiError, looksLikeApiJson } from "./lib/apiError";
+
+/**
+ * One JSON call to the run server, with "there is no run server" as a
+ * first-class outcome.
+ *
+ * This bundle is also deployed as a static site with no backend behind it, so
+ * every one of these can come back as a network failure or as the app's own
+ * index.html. Both raise an ApiError with offline set, which the pages read to
+ * offer the bundled walkthroughs instead of an error.
+ */
+async function apiJson(path, options) {
+  let resp;
+  try {
+    resp = await fetch(path, options);
+  } catch (cause) {
+    throw new ApiError(`Could not reach the run server at ${path}`, { offline: true, cause });
+  }
+
+  if (!looksLikeApiJson(resp.headers.get("content-type"))) {
+    throw new ApiError(`No run server is serving ${path}`, { offline: true, status: resp.status });
+  }
+
+  let body;
+  try {
+    body = await resp.json();
+  } catch (cause) {
+    throw new ApiError(`The response to ${path} was not readable JSON`, {
+      offline: true,
+      status: resp.status,
+      cause,
+    });
+  }
+
+  if (!resp.ok) {
+    // FastAPI puts the reason in `detail` — surface it instead of the bare status.
+    throw new ApiError(body?.detail || `Request to ${path} failed: ${resp.status}`, {
+      status: resp.status,
+    });
+  }
+  return body;
 }
 
-export async function fetchRun(runId) {
-  const resp = await fetch(`/api/runs/${runId}`);
-  if (!resp.ok) throw new Error(`Failed to fetch run: ${resp.status}`);
-  return resp.json();
+export function fetchRuns(limit = 50) {
+  return apiJson(`/api/runs?limit=${limit}`);
 }
 
-export async function fetchManifests() {
-  const resp = await fetch("/api/manifests");
-  if (!resp.ok) throw new Error(`Failed to fetch manifests: ${resp.status}`);
-  return resp.json();
+export function fetchRun(runId) {
+  return apiJson(`/api/runs/${runId}`);
 }
 
-export async function triggerRun(manifestPath) {
-  const resp = await fetch("/api/runs/trigger", {
+export function fetchManifests() {
+  return apiJson("/api/manifests");
+}
+
+export function triggerRun(manifestPath) {
+  return apiJson("/api/runs/trigger", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ manifest_path: manifestPath }),
   });
-  if (!resp.ok) {
-    // FastAPI puts the reason in `detail` — surface it instead of the bare status.
-    const detail = await resp.json().then((b) => b?.detail).catch(() => null);
-    throw new Error(detail || `Failed to start run: ${resp.status}`);
-  }
-  return resp.json();
 }
 
 /** WebSocket URL for a live run, on whatever host served this page. */

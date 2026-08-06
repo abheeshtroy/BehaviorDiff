@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { scenarioForManifest, watchLine } from "./scenarios";
-import { SCENARIOS } from "../demoData";
+import { scenarioForManifest, scenarioManifests, watchLine } from "./scenarios";
+import { SCENARIOS, SCENARIO_LIST } from "../demoData";
 
 describe("scenarioForManifest", () => {
   it("matches a bare filename", () => {
@@ -37,6 +37,43 @@ describe("scenarioForManifest", () => {
     // api-cleanup lives in scenario3-response-cleanup.yaml. Any string-munging
     // shortcut would break exactly here.
     expect(SCENARIOS["api-cleanup"].manifest).toBe("scenario3-response-cleanup.yaml");
+  });
+});
+
+describe("scenarioManifests", () => {
+  it("lists one entry per scenario", () => {
+    expect(scenarioManifests()).toHaveLength(SCENARIO_LIST.length);
+  });
+
+  it("produces entries the picker can match back to their scenario", () => {
+    // The fallback is only useful if it round-trips through the same lookup
+    // the API-backed list goes through.
+    for (const entry of scenarioManifests()) {
+      expect(scenarioForManifest(entry.filename)).not.toBeNull();
+      expect(scenarioForManifest(entry.path)).not.toBeNull();
+    }
+  });
+
+  it("fills every field /api/manifests returns", () => {
+    for (const entry of scenarioManifests()) {
+      expect(Object.keys(entry).sort()).toEqual(
+        ["app_name", "error", "filename", "path", "workflow_count"],
+      );
+    }
+  });
+
+  it("marks nothing as broken — a bundled scenario always parses", () => {
+    expect(scenarioManifests().every((m) => m.error === null)).toBe(true);
+  });
+
+  it("gives each entry a distinct path, which the picker keys on", () => {
+    const paths = scenarioManifests().map((m) => m.path);
+    expect(new Set(paths).size).toBe(paths.length);
+  });
+
+  it("reports the workflow count the scenario ran", () => {
+    const entry = scenarioManifests().find((m) => m.filename === SCENARIOS["checkout-validation"].manifest);
+    expect(entry.workflow_count).toBe(SCENARIOS["checkout-validation"].workflows);
   });
 });
 

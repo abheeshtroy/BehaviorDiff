@@ -4,7 +4,7 @@ import { fetchManifests, runStreamUrl, triggerRun } from "../api";
 import DemoBackground from "../components/DemoBackground";
 import OrientationPanel from "../components/OrientationPanel";
 import StateNotice from "../components/StateNotice";
-import { scenarioForManifest, watchLine } from "../lib/scenarios";
+import { scenarioForManifest, scenarioManifests, watchLine } from "../lib/scenarios";
 import { beatFor } from "../lib/orientation";
 import { noteRunFailure, realRunsAvailable } from "../lib/runMode";
 import { hasDiverged } from "../lib/stream";
@@ -142,7 +142,7 @@ function ComparisonCard({ manifest, selected, canRunReal, onRun }) {
   );
 }
 
-function ComparisonPicker({ manifests, error, selectedManifest, canRunReal, onRun }) {
+function ComparisonPicker({ manifests, offline, serverError, selectedManifest, canRunReal, onRun }) {
   // Whatever goes wrong with the server, the walkthrough is unaffected —
   // it is bundled with the page. Every dead end offers it.
   const scriptedEscape = (
@@ -150,14 +150,6 @@ function ComparisonPicker({ manifests, error, selectedManifest, canRunReal, onRu
       Watch a comparison instead
     </Link>
   );
-
-  if (error) {
-    return (
-      <StateNotice variant="error" title="Could not reach the run server" detail={error}>
-        {scriptedEscape}
-      </StateNotice>
-    );
-  }
 
   if (manifests === null) {
     return <StateNotice variant="loading" title="Loading comparisons…" />;
@@ -187,6 +179,13 @@ function ComparisonPicker({ manifests, error, selectedManifest, canRunReal, onRu
       <div className="picker-note">
         A walkthrough replays a recorded run, real findings, real evidence.
         {canRunReal && " Running one live needs Docker and takes about a minute."}
+        {offline && " Running the same comparison for real needs a local BehaviorDiff install."}
+        {/* Only said when the server answered and failed. A server that isn't
+            there at all is the normal case for this build, and the line above
+            already covers it. */}
+        {serverError && (
+          <div className="run-real-note">The run server errored, so this is the bundled list: {serverError}</div>
+        )}
       </div>
 
       <div className="sec-label">Comparisons</div>
@@ -208,6 +207,12 @@ export default function RunNew() {
   const [searchParams] = useSearchParams();
 
   const [manifests, setManifests] = useState(null);
+  // Whether a run server answered the manifest list. Null while it's in
+  // flight; false means this page is on its own — the static deployment, or a
+  // local one with the API down — and only the bundled walkthroughs work.
+  const [serverUp, setServerUp] = useState(null);
+  // Set only when the server was there and refused. Never set when there is
+  // simply no server: that is this build's normal state, not a fault.
   const [listError, setListError] = useState(null);
   const [run, setRun] = useState(null);
   // The manifest picked but not yet started. A real run takes the better part
@@ -229,8 +234,19 @@ export default function RunNew() {
 
   useEffect(() => {
     fetchManifests()
-      .then(setManifests)
-      .catch((e) => setListError(e.message));
+      .then((list) => {
+        setManifests(list);
+        setServerUp(true);
+      })
+      .catch((e) => {
+        // No usable list from the server, for any reason. The walkthroughs
+        // ship with the page, so the picker falls back to those rather than
+        // showing a dead end — the same comparisons, minus the ability to
+        // start one.
+        setManifests(scenarioManifests());
+        setServerUp(false);
+        if (!e.offline) setListError(e.message);
+      });
   }, []);
 
   const closeSocket = useCallback(() => {
@@ -363,7 +379,9 @@ export default function RunNew() {
     if (run?.events.length) bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [run?.events.length]);
 
-  const canRunReal = realRunsAvailable();
+  // A real run needs a run server to POST to as much as it needs a daemon.
+  const canRunReal = serverUp === true && realRunsAvailable();
+  const offline = serverUp === false;
 
   // Picked, not yet started: the same beat the demo flow opens on, so both
   // paths explain themselves the same way before anything starts moving.
@@ -413,15 +431,20 @@ export default function RunNew() {
 
           <ComparisonPicker
             manifests={manifests}
-            error={listError}
+            offline={offline}
+            serverError={listError}
             selectedManifest={preselected}
             canRunReal={canRunReal}
             onRun={setOrienting}
           />
 
-          <div className="picker-foot">
-            <Link to="/runs" className="back-link">All previous runs →</Link>
-          </div>
+          {/* Stored runs live wherever the run server does. With no server
+              there is nothing behind this link, so it isn't offered. */}
+          {!offline && (
+            <div className="picker-foot">
+              <Link to="/runs" className="back-link">All previous runs →</Link>
+            </div>
+          )}
         </div>
       </div>
     );
