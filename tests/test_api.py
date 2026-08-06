@@ -159,32 +159,14 @@ def test_list_manifests_returns_the_demo_manifests_with_metadata():
     assert resp.status_code == 200
 
     manifests = resp.json()
-    assert len(manifests) == 20
+    # The bench*.yaml evaluation cases are excluded — only the scenarios show.
+    assert len(manifests) == 3
 
     by_filename = {entry["filename"]: entry for entry in manifests}
     assert set(by_filename) == {
         "scenario1-checkout-validation.yaml",
         "scenario2-retry-logic.yaml",
         "scenario3-response-cleanup.yaml",
-        # The seeded-regression benchmark set.
-        "bench01-wrong-error-code.yaml",
-        "bench02-drop-total.yaml",
-        "bench03-wrong-content-type.yaml",
-        "bench04-swallow-not-found.yaml",
-        "bench05-hardcode-total.yaml",
-        "bench06-discount-math.yaml",
-        "bench07-skip-payment-record.yaml",
-        "bench08-wrong-order-status.yaml",
-        "bench09-double-fulfill.yaml",
-        "bench10-orphan-order.yaml",
-        "bench11-corrupt-discount.yaml",
-        "bench12-skip-payment-auth.yaml",
-        "bench13-double-payment-auth.yaml",
-        "bench14-wrong-payment-amount.yaml",
-        # The controls: these three should find nothing.
-        "bench15-rename-var.yaml",
-        "bench16-add-logging.yaml",
-        "bench17-reorder-imports.yaml",
     }
 
     scenario1 = by_filename["scenario1-checkout-validation.yaml"]

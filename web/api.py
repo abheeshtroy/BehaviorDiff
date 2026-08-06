@@ -86,7 +86,9 @@ class TriggerRequest(BaseModel):
 
 @app.get("/api/manifests")
 def api_list_manifests():
-    return discover_manifests()
+    # bench*.yaml are internal evaluation cases driven by bench/eval.py, not
+    # user-facing demos — keep them out of the dashboard's picker.
+    return [entry for entry in discover_manifests() if not entry["filename"].startswith("bench")]
 
 
 @app.post("/api/runs/trigger")
