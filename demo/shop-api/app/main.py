@@ -6,10 +6,11 @@ repository (demo/build_demo_repo.py) changes exactly one module of it:
     app/checkout.py     fix/checkout-validation, bug/wrong-error-code,
                         bug/drop-total-from-response, bug/wrong-order-status,
                         bug/orphan-order, bug/skip-payment-auth,
-                        bug/double-payment-auth
+                        bug/double-payment-auth, noop/rename-internal-var
     app/fulfillment.py  fix/retry-logic, bug/swallow-not-found,
-                        bug/double-fulfill-job
-    app/orders.py       fix/response-cleanup, bug/wrong-content-type
+                        bug/double-fulfill-job, noop/add-logging
+    app/orders.py       fix/response-cleanup, bug/wrong-content-type,
+                        noop/reorder-imports
     app/carts.py        bug/hardcode-cart-total, bug/break-discount-math,
                         bug/corrupt-discount-total
     app/payment.py      bug/skip-payment-record, bug/wrong-payment-amount

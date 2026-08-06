@@ -221,6 +221,33 @@ SCENARIOS = (
             "holds, so the two could disagree. Stop sending our own figure."
         ),
     ),
+    # The noop/ branches are the control half of the benchmark set. Each changes
+    # a module without changing what it does, so the run that compares it should
+    # find nothing at all — which is what the precision number is made of.
+    Scenario(
+        branch="noop/rename-internal-var",
+        overlay="noop-rename-internal-var",
+        subject="checkout: name the cart row for what it holds",
+        body=(
+            "`row` says where the value came from and not what it is, in a "
+            "function that goes on to read three more rows."
+        ),
+    ),
+    Scenario(
+        branch="noop/add-logging",
+        overlay="noop-add-logging",
+        subject="fulfillment: log the order being fulfilled",
+        body=(
+            "A queued job that never shipped left nothing behind to say the call "
+            "had arrived. Log the order on the way in."
+        ),
+    ),
+    Scenario(
+        branch="noop/reorder-imports",
+        overlay="noop-reorder-imports",
+        subject="orders: sort the imports",
+        body="Alphabetical, like the rest of the modules.",
+    ),
 )
 
 

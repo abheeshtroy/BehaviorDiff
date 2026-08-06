@@ -159,7 +159,7 @@ def test_list_manifests_returns_the_demo_manifests_with_metadata():
     assert resp.status_code == 200
 
     manifests = resp.json()
-    assert len(manifests) == 17
+    assert len(manifests) == 20
 
     by_filename = {entry["filename"]: entry for entry in manifests}
     assert set(by_filename) == {
@@ -181,6 +181,10 @@ def test_list_manifests_returns_the_demo_manifests_with_metadata():
         "bench12-skip-payment-auth.yaml",
         "bench13-double-payment-auth.yaml",
         "bench14-wrong-payment-amount.yaml",
+        # The controls: these three should find nothing.
+        "bench15-rename-var.yaml",
+        "bench16-add-logging.yaml",
+        "bench17-reorder-imports.yaml",
     }
 
     scenario1 = by_filename["scenario1-checkout-validation.yaml"]
