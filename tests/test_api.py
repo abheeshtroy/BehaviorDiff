@@ -159,7 +159,7 @@ def test_list_manifests_returns_the_demo_manifests_with_metadata():
     assert resp.status_code == 200
 
     manifests = resp.json()
-    assert len(manifests) == 14
+    assert len(manifests) == 17
 
     by_filename = {entry["filename"]: entry for entry in manifests}
     assert set(by_filename) == {
@@ -178,6 +178,9 @@ def test_list_manifests_returns_the_demo_manifests_with_metadata():
         "bench09-double-fulfill.yaml",
         "bench10-orphan-order.yaml",
         "bench11-corrupt-discount.yaml",
+        "bench12-skip-payment-auth.yaml",
+        "bench13-double-payment-auth.yaml",
+        "bench14-wrong-payment-amount.yaml",
     }
 
     scenario1 = by_filename["scenario1-checkout-validation.yaml"]

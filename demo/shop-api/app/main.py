@@ -5,13 +5,14 @@ repository (demo/build_demo_repo.py) changes exactly one module of it:
 
     app/checkout.py     fix/checkout-validation, bug/wrong-error-code,
                         bug/drop-total-from-response, bug/wrong-order-status,
-                        bug/orphan-order
+                        bug/orphan-order, bug/skip-payment-auth,
+                        bug/double-payment-auth
     app/fulfillment.py  fix/retry-logic, bug/swallow-not-found,
                         bug/double-fulfill-job
     app/orders.py       fix/response-cleanup, bug/wrong-content-type
     app/carts.py        bug/hardcode-cart-total, bug/break-discount-math,
                         bug/corrupt-discount-total
-    app/payment.py      bug/skip-payment-record
+    app/payment.py      bug/skip-payment-record, bug/wrong-payment-amount
 """
 
 from __future__ import annotations

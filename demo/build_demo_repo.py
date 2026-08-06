@@ -193,6 +193,34 @@ SCENARIOS = (
             "on the first. Record the code and let checkout price it once."
         ),
     ),
+    Scenario(
+        branch="bug/skip-payment-auth",
+        overlay="bug-skip-payment-auth",
+        subject="checkout: authorize at capture, not at checkout",
+        body=(
+            "Checkout held the customer for a provider round-trip before it would "
+            "take the order. Record the order and let the shipper authorize when "
+            "it captures."
+        ),
+    ),
+    Scenario(
+        branch="bug/double-payment-auth",
+        overlay="bug-double-payment-auth",
+        subject="checkout: hold the funds, then settle them",
+        body=(
+            "A single call left the funds held with nothing settling them. Take "
+            "the authorization and then capture it before writing the order."
+        ),
+    ),
+    Scenario(
+        branch="bug/wrong-payment-amount",
+        overlay="bug-wrong-payment-amount",
+        subject="payment: let the provider price the authorization",
+        body=(
+            "The amount was restated on a request for a cart the provider already "
+            "holds, so the two could disagree. Stop sending our own figure."
+        ),
+    ),
 )
 
 

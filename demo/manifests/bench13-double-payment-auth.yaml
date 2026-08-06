@@ -1,0 +1,59 @@
+# Benchmark regression 13: checkout authorizes the payment twice.
+#
+# An outbound-surface test that also shows on Postgres: the app routes through
+# the proxy (env_var points its own PAYMENT_URL at it), so the extra call is
+# recorded there, and authorize() writes a row per attempt so the extra row
+# lands in payment_calls too.
+app:
+  name: shop-api
+  start: uvicorn app.main:app --host 0.0.0.0 --port 8000
+  port: 8000
+  healthcheck: /health
+  dockerfile: Dockerfile
+
+database:
+  type: postgres
+  seed: seed.sql
+  observe_tables:
+    - payment_calls
+
+outbound:
+  services:
+    - name: payment-provider
+      base_url: https://api.payments.example.com
+      env_var: PAYMENT_URL      # the variable the app already reads
+      mock_responses:
+        POST /v1/authorize:
+          status: 200
+          body:
+            status: approved
+            auth_id: mock_001
+
+compare:
+  base_ref: main
+  target_ref: bug/double-payment-auth
+  repo: ../.demo-repo  # relative to this manifest; built by demo/build_demo_repo.py
+
+workflows:
+  - name: checkout-a-valid-cart
+    steps:
+      - method: POST
+        path: /api/carts
+        body: {"items": [{"sku": "SHOE-42", "qty": 1}]}
+        capture: {"cart_id": "$.cart_id"}
+      - method: POST
+        path: /api/checkout
+        body: {"cart_id": "{cart_id}", "address": {"street": "123 Main", "city": "SF", "zip": "94102"}}
+
+normalize:
+  ignore_fields:
+    - "*.created_at"
+    - "*.updated_at"
+    - "headers.date"      # response clock, not behaviour
+  uuid_fields:
+    - "*.cart_id"
+    - "*.order_id"
+    - "*.id"
+  numeric_tolerance: 0.001
+  ignore_row_order:
+    - payment_calls
