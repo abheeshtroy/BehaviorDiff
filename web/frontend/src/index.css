@@ -36,6 +36,18 @@
   --sans: 'Inter', -apple-system, sans-serif;
   --radius: 8px;
   --radius-lg: 12px;
+
+  /* ---- Liquid glass ----
+     One neutral treatment, reused by every panel that used to be a flat
+     --bg-1 card. The sheen layers over a semi-transparent base so the god
+     rays behind the page still read through the blur. Colours (text, badges,
+     accents) are untouched — only the surface changes. */
+  --glass-sheen: linear-gradient(135deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02));
+  --glass-base: rgba(15,15,19,0.55);     /* --bg-1, made transparent */
+  --glass-base-hover: rgba(26,26,34,0.62); /* --bg-hover, made transparent */
+  --glass-border: rgba(255,255,255,0.08);
+  --glass-blur: blur(12px);
+  --glass-inset: inset 0 1px 0 rgba(255,255,255,0.06);
 }
 
 html { font-size: 15px; }
@@ -51,8 +63,9 @@ a { color: inherit; text-decoration: none; }
 /* ---- Topbar ---- */
 .topbar {
   height: 48px; display: flex; align-items: center;
-  padding: 0 24px; border-bottom: 1px solid var(--border);
-  background: var(--bg-0); position: sticky; top: 0; z-index: 50;
+  padding: 0 24px; border-bottom: 1px solid var(--glass-border);
+  background: rgba(4,4,16,0.55); position: sticky; top: 0; z-index: 50;
+  backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
 }
 .topbar-logo { font-weight: 600; font-size: 15px; color: var(--text-0); letter-spacing: -0.02em; }
 .topbar-sep { width: 1px; height: 16px; background: var(--border-strong); margin: 0 12px; }
@@ -87,26 +100,53 @@ a { color: inherit; text-decoration: none; }
   margin: 0 auto 28px; line-height: 1.65;
 }
 .hero-btns { display: flex; gap: 10px; justify-content: center; margin-bottom: 16px; }
-.btn-pri {
-  background: linear-gradient(135deg, rgba(40,220,200,0.9), rgba(30,190,180,0.95)); color: #040410; border: none;
-  padding: 10px 24px; border-radius: var(--radius);
+/* The primary action is the one piece of lit glass on the page: cyan, backlit,
+   and never solid. Everything else is neutral frost, so this reads as the
+   only thing asking to be clicked. */
+.btn-pri, .btn-approve {
+  background: linear-gradient(135deg, rgba(34, 211, 238, 0.12), rgba(34, 211, 238, 0.06));
+  color: #a5f3fc;
+  border: 1px solid rgba(34, 211, 238, 0.25);
+  padding: 10px 24px; border-radius: 14px;
   font-size: 14px; font-weight: 500; font-family: var(--sans);
-  cursor: pointer; transition: opacity 0.15s;
+  cursor: pointer;
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.08),
+    inset 0 -1px 0 rgba(0,0,0,0.1),
+    0 0 20px rgba(34, 211, 238, 0.08);
+  transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
 }
-.btn-pri:hover { opacity: 0.92; box-shadow: 0 0 24px rgba(40,220,200,0.3); }
+.btn-pri:hover, .btn-approve:hover {
+  background: linear-gradient(135deg, rgba(34, 211, 238, 0.20), rgba(34, 211, 238, 0.10));
+  border-color: rgba(34, 211, 238, 0.40);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.12),
+    inset 0 -1px 0 rgba(0,0,0,0.1),
+    0 0 32px rgba(34, 211, 238, 0.18);
+}
+
+/* Neutral frost, so the pair sits on the same material at the same radius —
+   the colour is the only thing separating primary from secondary. */
 .btn-sec {
-  background: transparent; color: var(--text-2);
-  border: 1px solid var(--border-strong);
-  padding: 10px 24px; border-radius: var(--radius);
+  background: var(--glass-sheen);
+  color: var(--text-2);
+  border: 1px solid var(--glass-border);
+  padding: 10px 24px; border-radius: 14px;
   font-size: 14px; font-family: var(--sans); cursor: pointer;
+  backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-inset);
   transition: border-color 0.15s, color 0.15s;
 }
-.btn-sec:hover { border-color: var(--text-3); color: var(--text-1); }
+.btn-sec:hover { border-color: var(--border-strong); color: var(--text-1); }
 .hero-note { font-size: 12px; color: var(--text-3); }
 
 /* ---- Landing: Pitch visual ---- */
 .pitch {
-  background: var(--bg-1); border: 1px solid var(--border);
+  background: var(--glass-sheen), var(--glass-base);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-inset);
   border-radius: var(--radius-lg); padding: 24px; margin: 0 auto 56px;
   max-width: 720px;
 }
@@ -263,7 +303,13 @@ a { color: inherit; text-decoration: none; }
 .pr-intent { font-size: 13px; color: var(--text-2); margin-bottom: 16px; }
 
 .stats-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 8px; margin-bottom: 20px; }
-.stat-card { background: var(--bg-1); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; }
+.stat-card {
+  background: var(--glass-sheen), var(--glass-base);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-inset);
+  border-radius: var(--radius); padding: 14px;
+}
 .stat-label { font-size: 11px; color: var(--text-3); margin-bottom: 4px; }
 .stat-val { font-size: 20px; font-weight: 600; color: var(--text-0); font-family: var(--mono); }
 .stat-card.danger .stat-val { color: var(--red); }
@@ -290,8 +336,12 @@ a { color: inherit; text-decoration: none; }
 
 /* ---- Finding cards ---- */
 .finding-card {
-  position: relative; background: var(--bg-1);
-  border: 1px solid var(--border); border-radius: var(--radius-lg);
+  position: relative;
+  background: var(--glass-sheen), var(--glass-base);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-inset);
+  border-radius: var(--radius-lg);
   margin-bottom: 6px; cursor: pointer; overflow: hidden;
   transition: border-color 0.15s;
 }
@@ -348,7 +398,10 @@ a { color: inherit; text-decoration: none; }
 
 /* ---- Noise card ---- */
 .noise-card {
-  background: var(--bg-1); border: 1px solid var(--border);
+  background: var(--glass-sheen), var(--glass-base);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-inset);
   border-radius: var(--radius-lg); padding: 12px 18px; margin-top: 12px;
   font-size: 12.5px; color: var(--text-3); display: flex;
   align-items: center; gap: 8px;
@@ -356,7 +409,10 @@ a { color: inherit; text-decoration: none; }
 
 /* ---- Info panels ---- */
 .info-panel {
-  background: var(--bg-1); border: 1px solid var(--border);
+  background: var(--glass-sheen), var(--glass-base);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-inset);
   border-radius: var(--radius-lg); padding: 18px 22px; margin-bottom: 10px;
 }
 .info-label {
@@ -681,12 +737,19 @@ a { color: inherit; text-decoration: none; }
 
 .comparison-card {
   display: flex; justify-content: space-between; align-items: center; gap: 20px;
-  background: var(--bg-1); border: 1px solid var(--border);
+  background: var(--glass-sheen), var(--glass-base);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-inset);
   border-radius: var(--radius-lg); padding: 18px 22px; margin-bottom: 10px;
   transition: border-color 0.15s, background 0.15s;
 }
 .comparison-card:hover { border-color: var(--border-strong); }
-.comparison-card.selected { border-color: var(--blue-border); background: var(--bg-hover); }
+/* Selection stays a border change plus a lift in the glass, not an opaque fill. */
+.comparison-card.selected {
+  border-color: var(--blue-border);
+  background: var(--glass-sheen), var(--glass-base-hover);
+}
 
 .comparison-main { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .comparison-title-row { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
@@ -851,7 +914,12 @@ a { color: inherit; text-decoration: none; }
 .alert-detail code { font-family: var(--mono); font-size: 11.5px; color: var(--text-1); }
 
 .stream-actions { display: flex; gap: 8px; align-items: center; margin-top: 4px; }
-.btn-pri:disabled { opacity: 0.45; cursor: not-allowed; box-shadow: none; }
+/* Disabled stays unlit — the hover glow must not come back on a dead button. */
+.btn-pri:disabled, .btn-pri:disabled:hover {
+  opacity: 0.45; cursor: not-allowed; box-shadow: none;
+  background: linear-gradient(135deg, rgba(34, 211, 238, 0.12), rgba(34, 211, 238, 0.06));
+  border-color: rgba(34, 211, 238, 0.25);
+}
 .stream-note { font-size: 12.5px; color: var(--text-3); margin-top: 10px; }
 
 /* ---- Responsive ---- */
@@ -998,12 +1066,15 @@ a { color: inherit; text-decoration: none; }
 .stage-num { background: var(--bg-2); border-radius: 3px; padding: 2px 7px; }
 
 .code-block {
-  background: var(--bg-1); border: 1px solid var(--border);
+  background: var(--glass-sheen), var(--glass-base);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-inset);
   border-radius: var(--radius-lg); padding: 0 0 12px; margin-bottom: 14px; overflow: hidden;
 }
 .code-file {
   font-family: var(--mono); font-size: 11px; color: var(--text-3);
-  padding: 10px 16px; border-bottom: 1px solid var(--border); margin-bottom: 10px;
+  padding: 10px 16px; border-bottom: 1px solid var(--glass-border); margin-bottom: 10px;
 }
 .code-line { display: flex; gap: 14px; font-family: var(--mono); font-size: 12px; line-height: 1.9; padding: 0 16px; }
 .code-num { color: var(--text-3); min-width: 20px; text-align: right; font-size: 11px; }
@@ -1021,12 +1092,8 @@ a { color: inherit; text-decoration: none; }
 
 .ask-line { font-size: 15px; color: var(--text-0); margin-bottom: 12px; }
 .ask-btns { display: flex; gap: 8px; }
-.btn-approve {
-  background: var(--green); color: #04140d; border: none;
-  padding: 9px 24px; border-radius: var(--radius);
-  font-size: 13.5px; font-weight: 500; font-family: var(--sans); cursor: pointer;
-}
-.btn-approve:hover { opacity: 0.9; }
+/* Shares the primary glass; only the box is a touch smaller in the ask row. */
+.btn-approve { padding: 9px 24px; font-size: 13.5px; }
 
 .lane { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
 .lane-name { font-family: var(--mono); font-size: 11px; color: var(--text-3); min-width: 60px; text-align: right; }
@@ -1058,7 +1125,12 @@ a { color: inherit; text-decoration: none; }
 .run-phase { min-width: 150px; }
 
 .verdict {
-  background: var(--bg-1); border-left: 2px solid var(--amber);
+  background: var(--glass-sheen), var(--glass-base);
+  border: 1px solid var(--glass-border);
+  border-left: 2px solid var(--amber);
+  backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-inset);
+  border-radius: 0 var(--radius) var(--radius) 0;
   padding: 12px 16px; margin-bottom: 18px;
   font-size: 13.5px; color: var(--text-1);
   display: flex; gap: 10px; align-items: flex-start;
