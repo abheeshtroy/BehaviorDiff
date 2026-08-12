@@ -51,22 +51,44 @@
   --glass-radius: 14px;      /* cards and panels */
   --glass-radius-sm: 10px;   /* buttons — a pill reads as a toy, this reads as a key */
   /* Top-down, because the light in this UI comes from above. */
-  --glass-sheen: linear-gradient(180deg, rgba(255,255,255,0.07), rgba(255,255,255,0.025));
-  --glass-base: rgba(15,15,19,0.55);     /* --bg-1, made transparent */
-  --glass-base-hover: rgba(26,26,34,0.62); /* --bg-hover, made transparent */
+  --glass-sheen: linear-gradient(180deg, rgba(255,255,255,0.14), rgba(255,255,255,0.04));
+  /* The material lightens what's behind it. A pane is a white tint at low
+     opacity, not a dark fill: the backdrop should come through brighter and
+     hazier, the way frosted glass looks toward a light source, rather than
+     dimmed the way smoked glass does. --glass-scrim goes *under* that tint
+     wherever the god rays behind the page would otherwise take small text with
+     them; it is a floor on contrast, not a return to a dark surface. */
+  --glass-base: rgba(255,255,255,0.10);
+  --glass-base-hover: rgba(255,255,255,0.16);
+  --glass-scrim: rgba(10,10,16,0.25);
+  /* The stack a pane paints, bottom to top: scrim, white tint, sheen. The tint
+     needs a gradient wrapper because only the bottom layer of a `background`
+     shorthand may be a bare colour, and that slot belongs to the scrim. */
+  --glass-fill:
+    var(--glass-sheen),
+    linear-gradient(var(--glass-base), var(--glass-base)),
+    var(--glass-scrim);
+  --glass-fill-hover:
+    var(--glass-sheen),
+    linear-gradient(var(--glass-base-hover), var(--glass-base-hover)),
+    var(--glass-scrim);
   --glass-border: rgba(255,255,255,0.08);
-  --glass-blur: blur(12px);
-  /* Specular catch on the top edge, a ring standing in for the border, and a
-     long soft shadow so a pane floats over the page instead of printing on it.
-     The ring is inset rather than a real border so it can't take part in
-     layout — panes keep a transparent 1px border for the states that tint it. */
+  --glass-blur: blur(10px);
+  /* A bevel rather than a border, which is what makes the pane read as a thick
+     physical thing: a bright specular catch on the top edge where light hits
+     the curve, a darker inner shadow along the bottom, a faint ring standing in
+     for the border, and a long soft shadow lifting it off the page. The ring is
+     inset rather than a real border so it can't take part in layout — panes
+     keep a transparent 1px border for the states that tint it. */
   --glass-shadow:
-    inset 0 1px 1px rgba(255,255,255,0.35),
-    inset 0 0 0 1px rgba(255,255,255,0.1),
-    0 16px 40px rgba(0,0,0,0.35);
-  /* The blur is small next to the fallback's 12px on purpose: once the
-     backdrop is being bent, a heavy blur just smears the warp away. */
-  --glass-refract: url(#liquid-glass-refraction) blur(2px) saturate(160%);
+    inset 0 1px 1px rgba(255,255,255,0.55),
+    inset 0 -1px 2px rgba(0,0,0,0.15),
+    inset 0 0 0 1px rgba(255,255,255,0.14),
+    0 12px 32px rgba(0,0,0,0.4);
+  /* Moderate on purpose. The backdrop has to stay recognisable through the
+     pane — softened and bent, never erased — and the saturation lift keeps
+     colours behind the glass richer rather than washed out. */
+  --glass-refract: url(#liquid-glass-refraction) blur(8px) saturate(180%);
 }
 
 html { font-size: 15px; }
@@ -133,9 +155,10 @@ a { color: inherit; text-decoration: none; }
   /* The neutral dressing plus a cyan bloom — the tint is the only thing that
      separates it from the frost, so the material underneath has to match. */
   box-shadow:
-    inset 0 1px 1px rgba(255,255,255,0.35),
-    inset 0 0 0 1px rgba(255,255,255,0.1),
-    0 16px 40px rgba(0,0,0,0.35),
+    inset 0 1px 1px rgba(255,255,255,0.55),
+    inset 0 -1px 2px rgba(0,0,0,0.15),
+    inset 0 0 0 1px rgba(255,255,255,0.14),
+    0 12px 32px rgba(0,0,0,0.4),
     0 0 20px rgba(34, 211, 238, 0.08);
   transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
 }
@@ -143,9 +166,10 @@ a { color: inherit; text-decoration: none; }
   background: linear-gradient(135deg, rgba(34, 211, 238, 0.20), rgba(34, 211, 238, 0.10));
   border-color: rgba(34, 211, 238, 0.40);
   box-shadow:
-    inset 0 1px 1px rgba(255,255,255,0.45),
-    inset 0 0 0 1px rgba(255,255,255,0.14),
-    0 16px 40px rgba(0,0,0,0.35),
+    inset 0 1px 1px rgba(255,255,255,0.65),
+    inset 0 -1px 2px rgba(0,0,0,0.15),
+    inset 0 0 0 1px rgba(255,255,255,0.20),
+    0 12px 32px rgba(0,0,0,0.4),
     0 0 32px rgba(34, 211, 238, 0.18);
 }
 
@@ -166,7 +190,7 @@ a { color: inherit; text-decoration: none; }
 
 /* ---- Landing: Pitch visual ---- */
 .pitch {
-  background: var(--glass-sheen), var(--glass-base);
+  background: var(--glass-fill);
   border: 1px solid transparent;
   backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
   box-shadow: var(--glass-shadow);
@@ -327,7 +351,7 @@ a { color: inherit; text-decoration: none; }
 
 .stats-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 8px; margin-bottom: 20px; }
 .stat-card {
-  background: var(--glass-sheen), var(--glass-base);
+  background: var(--glass-fill);
   border: 1px solid transparent;
   backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
   box-shadow: var(--glass-shadow);
@@ -360,7 +384,7 @@ a { color: inherit; text-decoration: none; }
 /* ---- Finding cards ---- */
 .finding-card {
   position: relative;
-  background: var(--glass-sheen), var(--glass-base);
+  background: var(--glass-fill);
   border: 1px solid transparent;
   backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
   box-shadow: var(--glass-shadow);
@@ -421,7 +445,7 @@ a { color: inherit; text-decoration: none; }
 
 /* ---- Noise card ---- */
 .noise-card {
-  background: var(--glass-sheen), var(--glass-base);
+  background: var(--glass-fill);
   border: 1px solid transparent;
   backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
   box-shadow: var(--glass-shadow);
@@ -432,7 +456,7 @@ a { color: inherit; text-decoration: none; }
 
 /* ---- Info panels ---- */
 .info-panel {
-  background: var(--glass-sheen), var(--glass-base);
+  background: var(--glass-fill);
   border: 1px solid transparent;
   backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
   box-shadow: var(--glass-shadow);
@@ -760,7 +784,7 @@ a { color: inherit; text-decoration: none; }
 
 .comparison-card {
   display: flex; justify-content: space-between; align-items: center; gap: 20px;
-  background: var(--glass-sheen), var(--glass-base);
+  background: var(--glass-fill);
   border: 1px solid transparent;
   backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
   box-shadow: var(--glass-shadow);
@@ -771,7 +795,7 @@ a { color: inherit; text-decoration: none; }
 /* Selection stays a border change plus a lift in the glass, not an opaque fill. */
 .comparison-card.selected {
   border-color: var(--blue-border);
-  background: var(--glass-sheen), var(--glass-base-hover);
+  background: var(--glass-fill-hover);
 }
 
 .comparison-main { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
@@ -1089,7 +1113,7 @@ a { color: inherit; text-decoration: none; }
 .stage-num { background: var(--bg-2); border-radius: 3px; padding: 2px 7px; }
 
 .code-block {
-  background: var(--glass-sheen), var(--glass-base);
+  background: var(--glass-fill);
   border: 1px solid transparent;
   backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
   box-shadow: var(--glass-shadow);
@@ -1148,7 +1172,7 @@ a { color: inherit; text-decoration: none; }
 .run-phase { min-width: 150px; }
 
 .verdict {
-  background: var(--glass-sheen), var(--glass-base);
+  background: var(--glass-fill);
   border: 1px solid transparent;
   border-left: 2px solid var(--amber);
   backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
@@ -1260,12 +1284,27 @@ a { color: inherit; text-decoration: none; }
 /* The reusable surface. Everything the grouped rules below spell out per
    element, in one class, for markup that wants glass without a bespoke rule. */
 .liquid-glass {
-  background: var(--glass-sheen), var(--glass-base);
+  background: var(--glass-fill);
   border: 1px solid transparent;
   border-radius: var(--glass-radius);
   box-shadow: var(--glass-shadow);
   backdrop-filter: var(--glass-blur);
   -webkit-backdrop-filter: var(--glass-blur);
+}
+
+/* Muted text, re-levelled for the lighter material.
+   The white tint and sheen sit *above* the backdrop, so together they put a
+   floor of roughly rgb(58,58,58) under everything on a pane no matter how dark
+   the page behind it is. --text-3 (#55556a) is close enough to that floor to
+   disappear into it, which the scrim cannot fix — the scrim is below the tint,
+   and the tint is what sets the floor. So the two quiet steps of the ramp are
+   redefined on the surfaces themselves; because they are custom properties,
+   every descendant that reads them picks the new values up, and the ramp keeps
+   the same three steps it had on the dark cards. Off-glass text is untouched. */
+.pitch, .comparison-card, .stat-card, .finding-card, .info-panel,
+.noise-card, .code-block, .verdict, .liquid-glass {
+  --text-2: #a3a3b8;
+  --text-3: #7d7d95;
 }
 
 /* Refraction is decoration and never carries meaning: an engine that skips
