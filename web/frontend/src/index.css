@@ -50,57 +50,52 @@
      own wherever the refraction can't run. */
   --glass-radius: 14px;      /* cards and panels */
   --glass-radius-sm: 10px;   /* buttons — a pill reads as a toy, this reads as a key */
-  /* Top-down, because the light in this UI comes from above. */
-  --glass-sheen: linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.02));
-  /* The material lightens what's behind it. A pane is a white tint at low
-     opacity, not a dark fill: the backdrop should come through brighter and
-     hazier, the way frosted glass looks toward a light source, rather than
-     dimmed the way smoked glass does. --glass-scrim goes *under* that tint
-     wherever the god rays behind the page would otherwise take small text with
-     them; it is a floor on contrast, not a return to a dark surface.
+  /* The tint is *dark* and thin, not a white veil. This is the one thing
+     earlier passes had backwards. A white tint at any useful opacity paints an
+     opaque-ish wash over the backdrop, and a washed-out backdrop has nothing
+     left to bend — the refraction was working the whole time, the material was
+     hiding it. A dark tint at 0.18–0.32 darkens the god rays without erasing
+     them, so they stay legible through the pane, and it buys back contrast for
+     small text at the same time, which is why there is no longer a separate
+     scrim layer under the tint.
 
-     The tint is deliberately thin. Anything heavier veils the backdrop, and a
-     veiled backdrop has nothing left to refract — the bend at the rim is only
-     visible if you can still make out what is bending. Contrast for small text
-     is bought back through the scrim, which is a flat floor and so doesn't
-     erase the god rays' structure the way an opaque white wash does. */
-  --glass-base: rgba(255,255,255,0.05);
-  --glass-base-hover: rgba(255,255,255,0.09);
-  --glass-scrim: rgba(10,10,16,0.35);
-  /* The stack a pane paints, bottom to top: scrim, white tint, sheen. The tint
-     needs a gradient wrapper because only the bottom layer of a `background`
-     shorthand may be a bare colour, and that slot belongs to the scrim. */
+     Top-down, because the light in this UI comes from above. Values from the
+     kube.io liquid-glass reference. */
+  --glass-sheen: linear-gradient(180deg, rgba(14,14,22,0.18), rgba(14,14,22,0.32));
+  --glass-base: rgba(14,14,22,0.22);
+  /* Hover/selection lifts by adding light *over* the tint rather than thinning
+     it — thinning would read as the pane going missing, not brightening. */
+  --glass-base-hover: rgba(255,255,255,0.07);
+  /* The stack a pane paints, bottom to top: flat tint, then the sheen gradient.
+     The hover lift needs a gradient wrapper because only the bottom layer of a
+     `background` shorthand may be a bare colour, and that slot is the tint's. */
   --glass-fill:
     var(--glass-sheen),
-    linear-gradient(var(--glass-base), var(--glass-base)),
-    var(--glass-scrim);
+    var(--glass-base);
   --glass-fill-hover:
-    var(--glass-sheen),
     linear-gradient(var(--glass-base-hover), var(--glass-base-hover)),
-    var(--glass-scrim);
+    var(--glass-sheen),
+    var(--glass-base);
   --glass-border: rgba(255,255,255,0.08);
-  --glass-blur: blur(10px);
+  --glass-blur: blur(12px);
   /* A bevel rather than a border, which is what makes the pane read as a thick
      physical thing: a bright specular catch on the top edge where light hits
-     the curve, a darker inner shadow along the bottom, a faint ring standing in
-     for the border, and a long soft shadow lifting it off the page. The ring is
-     inset rather than a real border so it can't take part in layout — panes
-     keep a transparent 1px border for the states that tint it. */
+     the curve, a soft internal glow rising off the bottom edge, a faint ring
+     standing in for the border, and a long soft shadow lifting it off the page.
+     The ring is inset rather than a real border so it can't take part in
+     layout — panes keep a transparent 1px border for the states that tint it. */
   --glass-shadow:
-    inset 0 1px 1px rgba(255,255,255,0.55),
-    inset 0 -1px 2px rgba(0,0,0,0.15),
-    inset 0 0 0 1px rgba(255,255,255,0.14),
-    0 12px 32px rgba(0,0,0,0.4);
-  /* Light on purpose, and lighter than the blur-only fallback. Blur is applied
-     after the displacement, so every pixel of it smears the warp back out: past
-     a few px the bent god rays average into the straight ones and the
-     refraction reads as nothing but haze. The god rays are ~1px lines, so the
-     budget here is small: at 4px the bent ray was still a smudge, at 2px it
-     stays a line you can follow through the curve. The backdrop has to stay
-     recognisable through the pane — softened and bent, never erased — and the
-     saturation lift keeps colours behind the glass richer rather than washed
-     out. Contrast for text is the scrim's job, not the blur's. */
-  --glass-refract: url(#liquid-glass-refraction) blur(2px) saturate(180%);
+    0 24px 60px rgba(0,0,0,0.45),
+    inset 0 1px 1px rgba(255,255,255,0.5),
+    inset 0 -8px 20px rgba(255,255,255,0.06),
+    inset 0 0 0 1px rgba(255,255,255,0.13);
+  /* Blur runs after the displacement, so it smears the warp back out and the
+     budget is finite — but with a dark tint doing the contrast work instead of
+     a white wash, there is room for a proper frosted blur here. At 6px the god
+     rays behind a pane stay traceable through the bend at the rim while the
+     surface still reads as frosted rather than merely dimmed. The saturation
+     lift keeps colours behind the glass rich rather than washed out. */
+  --glass-refract: url(#liquid-glass-refraction) blur(6px) saturate(180%);
 }
 
 html { font-size: 15px; }
@@ -167,10 +162,10 @@ a { color: inherit; text-decoration: none; }
   /* The neutral dressing plus a cyan bloom — the tint is the only thing that
      separates it from the frost, so the material underneath has to match. */
   box-shadow:
-    inset 0 1px 1px rgba(255,255,255,0.55),
-    inset 0 -1px 2px rgba(0,0,0,0.15),
-    inset 0 0 0 1px rgba(255,255,255,0.14),
-    0 12px 32px rgba(0,0,0,0.4),
+    0 24px 60px rgba(0,0,0,0.45),
+    inset 0 1px 1px rgba(255,255,255,0.5),
+    inset 0 -8px 20px rgba(255,255,255,0.06),
+    inset 0 0 0 1px rgba(255,255,255,0.13),
     0 0 20px rgba(34, 211, 238, 0.08);
   transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
 }
@@ -178,10 +173,10 @@ a { color: inherit; text-decoration: none; }
   background: linear-gradient(135deg, rgba(34, 211, 238, 0.20), rgba(34, 211, 238, 0.10));
   border-color: rgba(34, 211, 238, 0.40);
   box-shadow:
-    inset 0 1px 1px rgba(255,255,255,0.65),
-    inset 0 -1px 2px rgba(0,0,0,0.15),
+    0 24px 60px rgba(0,0,0,0.45),
+    inset 0 1px 1px rgba(255,255,255,0.6),
+    inset 0 -8px 20px rgba(255,255,255,0.10),
     inset 0 0 0 1px rgba(255,255,255,0.20),
-    0 12px 32px rgba(0,0,0,0.4),
     0 0 32px rgba(34, 211, 238, 0.18);
 }
 
@@ -1304,20 +1299,11 @@ a { color: inherit; text-decoration: none; }
   -webkit-backdrop-filter: var(--glass-blur);
 }
 
-/* Muted text, re-levelled for the lighter material.
-   The white tint and sheen sit *above* the backdrop, so together they put a
-   floor of roughly rgb(58,58,58) under everything on a pane no matter how dark
-   the page behind it is. --text-3 (#55556a) is close enough to that floor to
-   disappear into it, which the scrim cannot fix — the scrim is below the tint,
-   and the tint is what sets the floor. So the two quiet steps of the ramp are
-   redefined on the surfaces themselves; because they are custom properties,
-   every descendant that reads them picks the new values up, and the ramp keeps
-   the same three steps it had on the dark cards. Off-glass text is untouched. */
-.pitch, .comparison-card, .stat-card, .finding-card, .info-panel,
-.noise-card, .code-block, .verdict, .liquid-glass {
-  --text-2: #a3a3b8;
-  --text-3: #7d7d95;
-}
+/* The muted text steps used to be re-levelled on glass surfaces, because a
+   white tint put a bright floor under everything on a pane and --text-3
+   vanished into it. The dark tint sets a floor near the page's own background
+   instead, so the global ramp reads on glass exactly as it does off it and the
+   overrides are gone. Nothing here needs to redefine --text-2 or --text-3. */
 
 /* Refraction is decoration and never carries meaning: an engine that skips
    this block keeps the blurred, dressed surface above and loses only the warp.
