@@ -15,12 +15,13 @@ export const REFRACTION_FILTER_ID = "liquid-glass-refraction";
  *
  * This is the only real strength dial. The map's own amplitude is pinned at
  * the byte ceiling (lib/refraction.js), so bending harder means moving further
- * per unit of map, not writing a bolder map. 80 puts the rim's peak walk at
- * ~40px: enough that a straight line crossing behind a card — a god ray, an
- * edge — visibly kinks where it enters the glass, which is the whole point of
- * refracting rather than only blurring.
+ * per unit of map, not writing a bolder map. 115 puts the rim's peak walk at
+ * ~57px: enough that a straight line crossing behind a card — a god ray, an
+ * edge — visibly bows where it enters the glass, which is the whole point of
+ * refracting rather than only blurring. Past ~130 the rim oversamples its own
+ * neighbourhood and the bend smears into a blob instead of reading as a line.
  */
-const SCALE = 80;
+const SCALE = 115;
 
 /** Resolution of the generated map. Stretched to each pane, so this is only
  *  how finely the ramp is sampled — the profile itself is smooth. */

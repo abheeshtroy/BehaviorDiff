@@ -25,15 +25,21 @@ export default function HeroBackground() {
             <stop offset="100%" stopColor="rgba(240,95,95,0)" />
           </linearGradient>
         </defs>
+        {/* Stroke widths are in viewBox units, and the viewBox is 1600 wide
+            stretched to the viewport — roughly a 0.46x squeeze at desktop. A
+            1.5 here used to land under a pixel, thin enough that the glass
+            panes' 2px blur erased it and the refracted bend had nothing left
+            to show. Sized so the traces survive the blur and stay legible
+            lines through the curve where they cross a pane. */}
         <g fill="none" strokeLinecap="round">
-          <path d="M-40 300 C 240 300, 560 300, 800 300" stroke="url(#traceL)" strokeWidth="1.5" />
-          <path d="M-40 311 C 240 311, 560 311, 800 305" stroke="url(#traceL)" strokeWidth="0.8" opacity="0.26" />
-          <path d="M-40 289 C 240 289, 560 289, 800 295" stroke="url(#traceL)" strokeWidth="0.8" opacity="0.26" />
-          <path d="M800 300 C 1000 230, 1250 174, 1640 130" stroke="url(#traceR)" strokeWidth="1.5" />
-          <path d="M800 300 C 1000 370, 1250 426, 1640 470" stroke="url(#traceR)" strokeWidth="1.5" opacity="0.7" />
-          <path d="M800 300 C 1020 266, 1280 234, 1640 208" stroke="url(#traceR)" strokeWidth="0.9" opacity="0.32" />
-          <path d="M800 300 C 1020 334, 1280 368, 1640 396" stroke="url(#traceR)" strokeWidth="0.9" opacity="0.32" />
-          <path d="M800 300 C 1040 298, 1340 296, 1640 294" stroke="url(#traceR)" strokeWidth="0.6" opacity="0.18" />
+          <path d="M-40 300 C 240 300, 560 300, 800 300" stroke="url(#traceL)" strokeWidth="2.6" />
+          <path d="M-40 311 C 240 311, 560 311, 800 305" stroke="url(#traceL)" strokeWidth="1.4" opacity="0.34" />
+          <path d="M-40 289 C 240 289, 560 289, 800 295" stroke="url(#traceL)" strokeWidth="1.4" opacity="0.34" />
+          <path d="M800 300 C 1000 230, 1250 174, 1640 130" stroke="url(#traceR)" strokeWidth="2.6" />
+          <path d="M800 300 C 1000 370, 1250 426, 1640 470" stroke="url(#traceR)" strokeWidth="2.6" opacity="0.7" />
+          <path d="M800 300 C 1020 266, 1280 234, 1640 208" stroke="url(#traceR)" strokeWidth="1.6" opacity="0.42" />
+          <path d="M800 300 C 1020 334, 1280 368, 1640 396" stroke="url(#traceR)" strokeWidth="1.6" opacity="0.42" />
+          <path d="M800 300 C 1040 298, 1340 296, 1640 294" stroke="url(#traceR)" strokeWidth="1.1" opacity="0.26" />
         </g>
         <circle cx="800" cy="300" r="28" fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="1" />
         <circle cx="800" cy="300" r="14" fill="none" stroke="rgba(255,255,255,0.14)" strokeWidth="1" />
