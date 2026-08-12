@@ -1,4 +1,5 @@
 import { BrowserRouter, Routes, Route, Link } from "react-router-dom";
+import GlassFilters from "./components/GlassFilters";
 import Landing from "./pages/Landing";
 import DemoRun from "./pages/DemoRun";
 import RunList from "./pages/RunList";
@@ -9,6 +10,8 @@ export default function App() {
   return (
     <BrowserRouter>
       <div>
+        {/* Mounted once: every .liquid-glass surface points at the same filter id. */}
+        <GlassFilters />
         <header className="topbar">
           <Link to="/" className="topbar-logo">BehaviorDiff</Link>
           <div className="topbar-sep" />

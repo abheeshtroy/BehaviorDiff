@@ -41,13 +41,32 @@
      One neutral treatment, reused by every panel that used to be a flat
      --bg-1 card. The sheen layers over a semi-transparent base so the god
      rays behind the page still read through the blur. Colours (text, badges,
-     accents) are untouched — only the surface changes. */
-  --glass-sheen: linear-gradient(135deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02));
+     accents) are untouched — only the surface changes.
+
+     Two things stack to make a pane read as glass. The optics — the backdrop
+     actually bending at the rim — come from an SVG filter and are Chromium
+     only; see --glass-refract and the @supports block near the bottom of this
+     file. The material comes from the tokens here, and carries the look on its
+     own wherever the refraction can't run. */
+  --glass-radius: 14px;      /* cards and panels */
+  --glass-radius-sm: 10px;   /* buttons — a pill reads as a toy, this reads as a key */
+  /* Top-down, because the light in this UI comes from above. */
+  --glass-sheen: linear-gradient(180deg, rgba(255,255,255,0.07), rgba(255,255,255,0.025));
   --glass-base: rgba(15,15,19,0.55);     /* --bg-1, made transparent */
   --glass-base-hover: rgba(26,26,34,0.62); /* --bg-hover, made transparent */
   --glass-border: rgba(255,255,255,0.08);
   --glass-blur: blur(12px);
-  --glass-inset: inset 0 1px 0 rgba(255,255,255,0.06);
+  /* Specular catch on the top edge, a ring standing in for the border, and a
+     long soft shadow so a pane floats over the page instead of printing on it.
+     The ring is inset rather than a real border so it can't take part in
+     layout — panes keep a transparent 1px border for the states that tint it. */
+  --glass-shadow:
+    inset 0 1px 1px rgba(255,255,255,0.35),
+    inset 0 0 0 1px rgba(255,255,255,0.1),
+    0 16px 40px rgba(0,0,0,0.35);
+  /* The blur is small next to the fallback's 12px on purpose: once the
+     backdrop is being bent, a heavy blur just smears the warp away. */
+  --glass-refract: url(#liquid-glass-refraction) blur(2px) saturate(160%);
 }
 
 html { font-size: 15px; }
@@ -107,13 +126,16 @@ a { color: inherit; text-decoration: none; }
   background: linear-gradient(135deg, rgba(34, 211, 238, 0.12), rgba(34, 211, 238, 0.06));
   color: #a5f3fc;
   border: 1px solid rgba(34, 211, 238, 0.25);
-  padding: 10px 24px; border-radius: 14px;
+  padding: 10px 24px; border-radius: var(--glass-radius-sm);
   font-size: 14px; font-weight: 500; font-family: var(--sans);
   cursor: pointer;
-  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
+  /* The neutral dressing plus a cyan bloom — the tint is the only thing that
+     separates it from the frost, so the material underneath has to match. */
   box-shadow:
-    inset 0 1px 0 rgba(255,255,255,0.08),
-    inset 0 -1px 0 rgba(0,0,0,0.1),
+    inset 0 1px 1px rgba(255,255,255,0.35),
+    inset 0 0 0 1px rgba(255,255,255,0.1),
+    0 16px 40px rgba(0,0,0,0.35),
     0 0 20px rgba(34, 211, 238, 0.08);
   transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
 }
@@ -121,8 +143,9 @@ a { color: inherit; text-decoration: none; }
   background: linear-gradient(135deg, rgba(34, 211, 238, 0.20), rgba(34, 211, 238, 0.10));
   border-color: rgba(34, 211, 238, 0.40);
   box-shadow:
-    inset 0 1px 0 rgba(255,255,255,0.12),
-    inset 0 -1px 0 rgba(0,0,0,0.1),
+    inset 0 1px 1px rgba(255,255,255,0.45),
+    inset 0 0 0 1px rgba(255,255,255,0.14),
+    0 16px 40px rgba(0,0,0,0.35),
     0 0 32px rgba(34, 211, 238, 0.18);
 }
 
@@ -131,11 +154,11 @@ a { color: inherit; text-decoration: none; }
 .btn-sec {
   background: var(--glass-sheen);
   color: var(--text-2);
-  border: 1px solid var(--glass-border);
-  padding: 10px 24px; border-radius: 14px;
+  border: 1px solid transparent;
+  padding: 10px 24px; border-radius: var(--glass-radius-sm);
   font-size: 14px; font-family: var(--sans); cursor: pointer;
   backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
-  box-shadow: var(--glass-inset);
+  box-shadow: var(--glass-shadow);
   transition: border-color 0.15s, color 0.15s;
 }
 .btn-sec:hover { border-color: var(--border-strong); color: var(--text-1); }
@@ -144,10 +167,10 @@ a { color: inherit; text-decoration: none; }
 /* ---- Landing: Pitch visual ---- */
 .pitch {
   background: var(--glass-sheen), var(--glass-base);
-  border: 1px solid var(--glass-border);
+  border: 1px solid transparent;
   backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
-  box-shadow: var(--glass-inset);
-  border-radius: var(--radius-lg); padding: 24px; margin: 0 auto 56px;
+  box-shadow: var(--glass-shadow);
+  border-radius: var(--glass-radius); padding: 24px; margin: 0 auto 56px;
   max-width: 720px;
 }
 /* Names the change once, so both columns are read as one story. */
@@ -305,10 +328,10 @@ a { color: inherit; text-decoration: none; }
 .stats-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 8px; margin-bottom: 20px; }
 .stat-card {
   background: var(--glass-sheen), var(--glass-base);
-  border: 1px solid var(--glass-border);
+  border: 1px solid transparent;
   backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
-  box-shadow: var(--glass-inset);
-  border-radius: var(--radius); padding: 14px;
+  box-shadow: var(--glass-shadow);
+  border-radius: var(--glass-radius); padding: 14px;
 }
 .stat-label { font-size: 11px; color: var(--text-3); margin-bottom: 4px; }
 .stat-val { font-size: 20px; font-weight: 600; color: var(--text-0); font-family: var(--mono); }
@@ -338,10 +361,10 @@ a { color: inherit; text-decoration: none; }
 .finding-card {
   position: relative;
   background: var(--glass-sheen), var(--glass-base);
-  border: 1px solid var(--glass-border);
+  border: 1px solid transparent;
   backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
-  box-shadow: var(--glass-inset);
-  border-radius: var(--radius-lg);
+  box-shadow: var(--glass-shadow);
+  border-radius: var(--glass-radius);
   margin-bottom: 6px; cursor: pointer; overflow: hidden;
   transition: border-color 0.15s;
 }
@@ -399,10 +422,10 @@ a { color: inherit; text-decoration: none; }
 /* ---- Noise card ---- */
 .noise-card {
   background: var(--glass-sheen), var(--glass-base);
-  border: 1px solid var(--glass-border);
+  border: 1px solid transparent;
   backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
-  box-shadow: var(--glass-inset);
-  border-radius: var(--radius-lg); padding: 12px 18px; margin-top: 12px;
+  box-shadow: var(--glass-shadow);
+  border-radius: var(--glass-radius); padding: 12px 18px; margin-top: 12px;
   font-size: 12.5px; color: var(--text-3); display: flex;
   align-items: center; gap: 8px;
 }
@@ -410,10 +433,10 @@ a { color: inherit; text-decoration: none; }
 /* ---- Info panels ---- */
 .info-panel {
   background: var(--glass-sheen), var(--glass-base);
-  border: 1px solid var(--glass-border);
+  border: 1px solid transparent;
   backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
-  box-shadow: var(--glass-inset);
-  border-radius: var(--radius-lg); padding: 18px 22px; margin-bottom: 10px;
+  box-shadow: var(--glass-shadow);
+  border-radius: var(--glass-radius); padding: 18px 22px; margin-bottom: 10px;
 }
 .info-label {
   font-family: var(--mono); font-size: 10px; font-weight: 500;
@@ -738,10 +761,10 @@ a { color: inherit; text-decoration: none; }
 .comparison-card {
   display: flex; justify-content: space-between; align-items: center; gap: 20px;
   background: var(--glass-sheen), var(--glass-base);
-  border: 1px solid var(--glass-border);
+  border: 1px solid transparent;
   backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
-  box-shadow: var(--glass-inset);
-  border-radius: var(--radius-lg); padding: 18px 22px; margin-bottom: 10px;
+  box-shadow: var(--glass-shadow);
+  border-radius: var(--glass-radius); padding: 18px 22px; margin-bottom: 10px;
   transition: border-color 0.15s, background 0.15s;
 }
 .comparison-card:hover { border-color: var(--border-strong); }
@@ -1067,10 +1090,10 @@ a { color: inherit; text-decoration: none; }
 
 .code-block {
   background: var(--glass-sheen), var(--glass-base);
-  border: 1px solid var(--glass-border);
+  border: 1px solid transparent;
   backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
-  box-shadow: var(--glass-inset);
-  border-radius: var(--radius-lg); padding: 0 0 12px; margin-bottom: 14px; overflow: hidden;
+  box-shadow: var(--glass-shadow);
+  border-radius: var(--glass-radius); padding: 0 0 12px; margin-bottom: 14px; overflow: hidden;
 }
 .code-file {
   font-family: var(--mono); font-size: 11px; color: var(--text-3);
@@ -1126,11 +1149,11 @@ a { color: inherit; text-decoration: none; }
 
 .verdict {
   background: var(--glass-sheen), var(--glass-base);
-  border: 1px solid var(--glass-border);
+  border: 1px solid transparent;
   border-left: 2px solid var(--amber);
   backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
-  box-shadow: var(--glass-inset);
-  border-radius: 0 var(--radius) var(--radius) 0;
+  box-shadow: var(--glass-shadow);
+  border-radius: 0 var(--glass-radius) var(--glass-radius) 0;
   padding: 12px 16px; margin-bottom: 18px;
   font-size: 13.5px; color: var(--text-1);
   display: flex; gap: 10px; align-items: flex-start;
@@ -1218,4 +1241,55 @@ a { color: inherit; text-decoration: none; }
 @media (prefers-reduced-motion: reduce) {
   .demobg, .demo-pane { animation: none; opacity: 1; }
   .col { transition: none; }
+}
+
+/* ---- Liquid glass: refraction ----
+   Blur and tint alone read flat, because nothing behind the pane moves. Real
+   glass bends what's behind it, so the backdrop goes through an SVG
+   displacement filter (components/GlassFilters.jsx) that pushes it sideways in
+   a band along the rim and leaves the middle alone.
+
+   The <svg> holding the filter has to stay in the render tree for url(#id) to
+   resolve — Blink drops filters inside a display:none subtree — so it is
+   collapsed to nothing instead of hidden. */
+.glass-filters {
+  position: absolute; width: 0; height: 0;
+  overflow: hidden; pointer-events: none;
+}
+
+/* The reusable surface. Everything the grouped rules below spell out per
+   element, in one class, for markup that wants glass without a bespoke rule. */
+.liquid-glass {
+  background: var(--glass-sheen), var(--glass-base);
+  border: 1px solid transparent;
+  border-radius: var(--glass-radius);
+  box-shadow: var(--glass-shadow);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+}
+
+/* Refraction is decoration and never carries meaning: an engine that skips
+   this block keeps the blurred, dressed surface above and loses only the warp.
+
+   Gated on Blink rather than on `backdrop-filter: url(...)` alone, because
+   Gecko and WebKit accept that value at parse time and then drop the whole
+   filter chain when the reference turns out not to be renderable — a plain
+   @supports test would cost them their blur as well as the refraction. So the
+   query also narrows Gecko out by -moz-appearance and WebKit out by
+   -webkit-named-image — two properties Blink has neither of.
+
+   .topbar is deliberately absent: it spans the viewport and is sticky, so it
+   would re-run the filter over a couple of thousand pixels on every scroll
+   frame. It keeps the dressing and its 16px blur. The rest are bounded by
+   .page's 900px, i.e. 852px of content at the widest. */
+@supports (backdrop-filter: url(#liquid-glass-refraction))
+      and (not (-moz-appearance: none))
+      and (not (background: -webkit-named-image(apple-pay-logo-black))) {
+  .liquid-glass,
+  .pitch, .comparison-card, .stat-card, .finding-card, .info-panel,
+  .noise-card, .code-block, .verdict,
+  .btn-pri, .btn-approve, .btn-sec {
+    backdrop-filter: var(--glass-refract);
+    -webkit-backdrop-filter: var(--glass-refract);
+  }
 }
