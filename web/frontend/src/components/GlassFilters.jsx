@@ -12,8 +12,15 @@ export const REFRACTION_FILTER_ID = "liquid-glass-refraction";
  * Peak sideways walk of the backdrop, in CSS pixels. `feDisplacementMap`
  * spends half its `scale` in each direction, so the rim of a pane pulls the
  * background about `SCALE / 2` px.
+ *
+ * This is the only real strength dial. The map's own amplitude is pinned at
+ * the byte ceiling (lib/refraction.js), so bending harder means moving further
+ * per unit of map, not writing a bolder map. 80 puts the rim's peak walk at
+ * ~40px: enough that a straight line crossing behind a card — a god ray, an
+ * edge — visibly kinks where it enters the glass, which is the whole point of
+ * refracting rather than only blurring.
  */
-const SCALE = 22;
+const SCALE = 80;
 
 /** Resolution of the generated map. Stretched to each pane, so this is only
  *  how finely the ramp is sampled — the profile itself is smooth. */

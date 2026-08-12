@@ -51,16 +51,22 @@
   --glass-radius: 14px;      /* cards and panels */
   --glass-radius-sm: 10px;   /* buttons — a pill reads as a toy, this reads as a key */
   /* Top-down, because the light in this UI comes from above. */
-  --glass-sheen: linear-gradient(180deg, rgba(255,255,255,0.14), rgba(255,255,255,0.04));
+  --glass-sheen: linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.02));
   /* The material lightens what's behind it. A pane is a white tint at low
      opacity, not a dark fill: the backdrop should come through brighter and
      hazier, the way frosted glass looks toward a light source, rather than
      dimmed the way smoked glass does. --glass-scrim goes *under* that tint
      wherever the god rays behind the page would otherwise take small text with
-     them; it is a floor on contrast, not a return to a dark surface. */
-  --glass-base: rgba(255,255,255,0.10);
-  --glass-base-hover: rgba(255,255,255,0.16);
-  --glass-scrim: rgba(10,10,16,0.25);
+     them; it is a floor on contrast, not a return to a dark surface.
+
+     The tint is deliberately thin. Anything heavier veils the backdrop, and a
+     veiled backdrop has nothing left to refract — the bend at the rim is only
+     visible if you can still make out what is bending. Contrast for small text
+     is bought back through the scrim, which is a flat floor and so doesn't
+     erase the god rays' structure the way an opaque white wash does. */
+  --glass-base: rgba(255,255,255,0.05);
+  --glass-base-hover: rgba(255,255,255,0.09);
+  --glass-scrim: rgba(10,10,16,0.35);
   /* The stack a pane paints, bottom to top: scrim, white tint, sheen. The tint
      needs a gradient wrapper because only the bottom layer of a `background`
      shorthand may be a bare colour, and that slot belongs to the scrim. */
@@ -85,10 +91,16 @@
     inset 0 -1px 2px rgba(0,0,0,0.15),
     inset 0 0 0 1px rgba(255,255,255,0.14),
     0 12px 32px rgba(0,0,0,0.4);
-  /* Moderate on purpose. The backdrop has to stay recognisable through the
-     pane — softened and bent, never erased — and the saturation lift keeps
-     colours behind the glass richer rather than washed out. */
-  --glass-refract: url(#liquid-glass-refraction) blur(8px) saturate(180%);
+  /* Light on purpose, and lighter than the blur-only fallback. Blur is applied
+     after the displacement, so every pixel of it smears the warp back out: past
+     a few px the bent god rays average into the straight ones and the
+     refraction reads as nothing but haze. The god rays are ~1px lines, so the
+     budget here is small: at 4px the bent ray was still a smudge, at 2px it
+     stays a line you can follow through the curve. The backdrop has to stay
+     recognisable through the pane — softened and bent, never erased — and the
+     saturation lift keeps colours behind the glass richer rather than washed
+     out. Contrast for text is the scrim's job, not the blur's. */
+  --glass-refract: url(#liquid-glass-refraction) blur(2px) saturate(180%);
 }
 
 html { font-size: 15px; }

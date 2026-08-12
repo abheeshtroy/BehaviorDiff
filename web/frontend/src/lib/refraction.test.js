@@ -65,14 +65,24 @@ describe("displacementMapPixels", () => {
 
   it("pushes the horizontal offset into red and the vertical into green", () => {
     // Mid-height, extreme left/right: red swings, green stays put.
-    expect(at(pixels, size, 0, mid)).toEqual({ r: NEUTRAL - AMPLITUDE, g: NEUTRAL, b: NEUTRAL, a: 255 });
-    expect(at(pixels, size, size - 1, mid)).toEqual({ r: NEUTRAL + AMPLITUDE, g: NEUTRAL, b: NEUTRAL, a: 255 });
+    expect(at(pixels, size, 0, mid)).toEqual({ r: NEUTRAL + AMPLITUDE, g: NEUTRAL, b: NEUTRAL, a: 255 });
+    expect(at(pixels, size, size - 1, mid)).toEqual({ r: NEUTRAL - AMPLITUDE, g: NEUTRAL, b: NEUTRAL, a: 255 });
     // Mid-width, extreme top/bottom: green swings, red stays put.
-    expect(at(pixels, size, mid, 0)).toEqual({ r: NEUTRAL, g: NEUTRAL - AMPLITUDE, b: NEUTRAL, a: 255 });
-    expect(at(pixels, size, mid, size - 1)).toEqual({ r: NEUTRAL, g: NEUTRAL + AMPLITUDE, b: NEUTRAL, a: 255 });
+    expect(at(pixels, size, mid, 0)).toEqual({ r: NEUTRAL, g: NEUTRAL + AMPLITUDE, b: NEUTRAL, a: 255 });
+    expect(at(pixels, size, mid, size - 1)).toEqual({ r: NEUTRAL, g: NEUTRAL - AMPLITUDE, b: NEUTRAL, a: 255 });
   });
 
-  it("bends outward symmetrically, so neither side of a pane is favoured", () => {
+  it("bends the rim inward, so it never samples past the pane's own backdrop", () => {
+    // A backdrop filter can only see the pane's own box. The right edge must
+    // therefore reach left (below neutral) and the bottom edge must reach up,
+    // or the band that should show the bend samples transparency and goes dark.
+    expect(at(pixels, size, size - 1, mid).r).toBeLessThan(NEUTRAL);
+    expect(at(pixels, size, 0, mid).r).toBeGreaterThan(NEUTRAL);
+    expect(at(pixels, size, mid, size - 1).g).toBeLessThan(NEUTRAL);
+    expect(at(pixels, size, mid, 0).g).toBeGreaterThan(NEUTRAL);
+  });
+
+  it("bends symmetrically, so neither side of a pane is favoured", () => {
     for (let x = 0; x < size; x++) {
       const left = at(pixels, size, x, mid).r;
       const right = at(pixels, size, size - 1 - x, mid).r;
@@ -83,8 +93,8 @@ describe("displacementMapPixels", () => {
 
   it("bends diagonally in the corners, where both edges meet", () => {
     const corner = at(pixels, size, size - 1, size - 1);
-    expect(corner.r).toBe(NEUTRAL + AMPLITUDE);
-    expect(corner.g).toBe(NEUTRAL + AMPLITUDE);
+    expect(corner.r).toBe(NEUTRAL - AMPLITUDE);
+    expect(corner.g).toBe(NEUTRAL - AMPLITUDE);
   });
 
   it("stays inside the byte range at every pixel", () => {
