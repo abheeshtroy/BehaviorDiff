@@ -345,17 +345,19 @@ tests/                 # 340+ Python tests, all passing
 
 ## Roadmap
 
-Phase 3 is done — the web dashboard, the live run stream, run persistence, and
-the four run views are all in. Next:
+Core engine, web dashboard, benchmark harness, public demo deployment, Python
+packaging, and CI validation are complete.
 
-- [ ] Benchmark / evaluation harness with seeded regressions — measure detection rate, not just "it found something"
-- [ ] Public deployment so the demo is reachable without cloning
-- [ ] Demo video
-- [ ] CLI observer — compare stdout/stderr/exit codes for non-HTTP apps
-- [ ] File system observer — diff output directories for data pipelines
-- [ ] MySQL / MongoDB observers
+Next, in priority order:
+
+- [ ] 90-second demo video
 - [ ] GitHub Action for automated PR comparison
-- [ ] Positional row matching for UUID-keyed inserts
+- [ ] Controlled experiments, minimal reproduction, and verified test generation
+- [ ] Real-world validation against external repositories and regression commits
+- [ ] CLI observer for stdout/stderr/exit codes
+- [ ] File-system observer for data pipelines
+- [ ] MySQL / MongoDB observers
+- [ ] Logs, metrics, browser UI, and concurrency observation surfaces
 
 ## License
 
