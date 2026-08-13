@@ -77,7 +77,7 @@
     var(--glass-sheen),
     var(--glass-base);
   --glass-border: rgba(255,255,255,0.08);
-  --glass-blur: blur(12px);
+  --glass-blur: blur(20px);
   /* A bevel rather than a border, which is what makes the pane read as a thick
      physical thing: a bright specular catch on the top edge where light hits
      the curve, a soft internal glow rising off the bottom edge, a faint ring
