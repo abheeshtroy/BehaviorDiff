@@ -1,6 +1,9 @@
 [project]
 name = "behaviordiff"
 version = "0.1.0"
+description = "Compare the behavior of two versions of an application."
+readme = "README.md"
+license = { text = "MIT" }
 requires-python = ">=3.12"
 dependencies = [
     "pydantic>=2",
@@ -15,10 +18,23 @@ dependencies = [
     "websockets>=13",
 ]
 
+[project.scripts]
+behaviordiff = "cli:main"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=8",
 ]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["cli"]
+
+[tool.setuptools.packages.find]
+include = ["ai*", "engine*", "web*"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
