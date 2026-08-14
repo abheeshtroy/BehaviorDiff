@@ -1,4 +1,5 @@
 import HeroBackground from "../components/HeroBackground";
+import { Fragment } from "react";
 import { Link } from "react-router-dom";
 
 const HEADLINE = "Find every unintended change before your users do";
@@ -14,18 +15,19 @@ export default function Landing() {
       <div className="hero">
         <h1>
           {WORDS.map((word, i) => (
-            <span
-              key={i}
-              className="hero-word"
-              style={{ animationDelay: `${0.18 + i * 0.055}s` }}
-            >
-              {word}&nbsp;
-            </span>
+            <Fragment key={word}>
+              <span
+                className="hero-word"
+                style={{ animationDelay: `${0.18 + i * 0.055}s` }}
+              >
+                {word}&nbsp;
+              </span>
+              {i === 3 && <br />}
+            </Fragment>
           ))}
         </h1>
         <p className="hero-sub hero-fade" style={{ animationDelay: `${tailDelay + 0.05}s` }}>
-          BehaviorDiff runs your app on both branches under identical conditions
-          and surfaces every difference in responses, database state, side effects, and timing.
+          BehaviorDiff runs the same workflow against both versions and surfaces differences in responses, data, side effects, and timing.
         </p>
         <div className="hero-btns hero-fade" style={{ animationDelay: `${tailDelay + 0.14}s` }}>
           <Link to="/runs/new"><button className="btn-pri">Try a live comparison</button></Link>
