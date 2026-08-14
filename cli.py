@@ -20,6 +20,19 @@ from engine.pipeline import RunEvent, run_pipeline
 log = structlog.get_logger(__name__)
 
 
+class _CurrentStream:
+    """A structlog stream that follows the process's current stdio object."""
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+    def write(self, value: str) -> int:
+        return getattr(sys, self.name).write(value)
+
+    def flush(self) -> None:
+        getattr(sys, self.name).flush()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         prog="behaviordiff",
@@ -40,15 +53,13 @@ def main() -> int:
     )
     parser.add_argument(
         "--base-ref",
-        default="main",
-        help="Git ref for the base version, written into the generated manifest "
-             "(--init only). Default: main.",
+        help="Git ref for the base version at runtime; with --init, use it in the "
+             "generated manifest. Without --init, overrides compare.base_ref in memory.",
     )
     parser.add_argument(
         "--target-ref",
-        default="HEAD",
-        help="Git ref for the target version, written into the generated manifest "
-             "(--init only). Default: HEAD.",
+        help="Git ref for the target version at runtime; with --init, use it in the "
+             "generated manifest. Without --init, overrides compare.target_ref in memory.",
     )
     parser.add_argument(
         "--json",
@@ -96,6 +107,17 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    # stdout is a machine-readable channel in JSON mode. Keep all structlog
+    # diagnostics on stderr so the result remains exactly one JSON document.
+    # Explicitly select stdout for the human-readable mode to preserve the
+    # CLI's existing logging behavior when main() is called more than once in
+    # the same process (for example, by an embedding application or tests).
+    structlog.configure(
+        logger_factory=structlog.PrintLoggerFactory(
+            file=_CurrentStream("stderr" if args.json_output else "stdout")
+        )
+    )
+
     if args.init:
         return _run_init(args)
 
@@ -109,7 +131,14 @@ def main() -> int:
         manifest = load_manifest(args.manifest)
     except ManifestError as exc:
         print(f"Manifest error: {exc}", file=sys.stderr)
-        return 1
+        return 2
+
+    # Runtime overrides deliberately affect only this parsed model. The YAML is
+    # the user's source of truth and must remain unchanged by a comparison.
+    if args.base_ref is not None:
+        manifest.compare.base_ref = args.base_ref
+    if args.target_ref is not None:
+        manifest.compare.target_ref = args.target_ref
 
     log.info("manifest_loaded", app=manifest.app.name, workflows=len(manifest.workflows))
 
@@ -229,8 +258,8 @@ def _run_init(args) -> int:
     try:
         manifest_yaml = generate_manifest(
             str(repo_path),
-            base_ref=args.base_ref,
-            target_ref=args.target_ref,
+            base_ref=args.base_ref or "main",
+            target_ref=args.target_ref or "HEAD",
             pr_description=args.pr_description,
         )
     except ManifestGenerationError as exc:

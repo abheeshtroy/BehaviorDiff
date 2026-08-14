@@ -1,0 +1,33 @@
+name: BehaviorDiff
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  behaviordiff:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the pull request
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run BehaviorDiff
+        id: behaviordiff
+        uses: abheeshtroy/BehaviorDiff@<ref>
+        with:
+          manifest: behaviordiff.yaml
+          base-ref: ${{ github.event.pull_request.base.sha }}
+          target-ref: ${{ github.event.pull_request.head.sha }}
+          upload-artifact-name: behaviordiff-results
+
+      - name: Upload BehaviorDiff results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.behaviordiff.outputs.artifact_name }}
+          path: .behaviordiff-results/
+          if-no-files-found: warn

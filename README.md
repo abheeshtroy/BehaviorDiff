@@ -172,6 +172,92 @@ python cli.py manifest.yaml \
 
 Each finding gets labeled `[intended]`, `[suspicious]`, or `[noise]` with reasoning.
 
+## GitHub Action
+
+BehaviorDiff can run in another repository's pull-request workflow. Add the
+manifest and workflow below (pin `@<ref>` to a release or commit when using the
+action from another repository):
+
+```yaml
+name: BehaviorDiff
+on: pull_request
+
+jobs:
+  behaviordiff:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: abheeshtroy/BehaviorDiff@<ref>
+        with:
+          manifest: behaviordiff.yaml
+          base-ref: ${{ github.event.pull_request.base.sha }}
+          target-ref: ${{ github.event.pull_request.head.sha }}
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: behaviordiff-results
+          path: .behaviordiff-results/
+```
+
+The repository also contains this consumer-ready example at
+`examples/github-actions/behaviordiff.yml`.
+
+### Manifest contract
+
+The manifest is YAML with these required sections:
+
+```yaml
+app:
+  name: shop-api
+  start: uvicorn app.main:app --host 0.0.0.0 --port 8000
+  port: 8000
+  healthcheck: /health
+compare:
+  repo: .
+  base_ref: main
+  target_ref: feature
+workflows:
+  - name: health
+    steps:
+      - method: GET
+        path: /health
+```
+
+`app` describes a Docker-built HTTP service. `compare.repo` is the app
+directory relative to the manifest (default `.`); `compare.base_ref` and
+`compare.target_ref` are Git refs. Each workflow has ordered HTTP steps, with
+optional JSON bodies and captures. Optional `database` config observes
+Postgres tables, `outbound` config mocks external HTTP services, and
+`normalize` suppresses measured nondeterminism. Unknown keys are rejected.
+
+### Action inputs and behavior
+
+The composite action accepts `manifest` (`behaviordiff.yaml`), required
+`base-ref` and `target-ref`, `fail-on-findings` (`false`), `python-version`
+(`3.12`), and `upload-artifact-name` (`behaviordiff-results`). The last input is
+the artifact-name convention for the caller workflow; the action always writes
+`.behaviordiff-results/result.json` and `summary.md` for upload.
+
+It installs BehaviorDiff from the action's own source directory, verifies that
+Docker is available, and runs against the checked-out caller repository. Docker
+must be installed, running, and permitted to build images and start containers;
+the manifest's app Dockerfile and commands are executed by Docker, so review
+manifests before enabling the workflow. No secrets are required by the Action.
+
+Exit behavior is preserved: `0` means no findings, `1` means findings, and `2`
+means setup or orchestration failure. The Action only fails the job for status
+`1` when `fail-on-findings: true`; setup/orchestration failures always fail.
+The JSON and Markdown files remain available for an `if: always()` artifact
+upload even when findings are present.
+
+The example uses the standard `pull_request` event. Fork pull requests run with
+the fork's head SHA and the base SHA supplied by GitHub, but do not receive
+repository secrets; this workflow does not need secrets, does not comment on
+PRs, and does not use `pull_request_target`. A fork must provide a compatible
+Dockerfile, manifest, and Git history for the comparison to succeed.
+
 ## Demo scenarios
 
 The repo ships with three seeded scenarios against a FastAPI shop API, each with a planted bug. Every scenario is one branch of the generated demo repository, changing exactly one module:
@@ -351,7 +437,7 @@ packaging, and CI validation are complete.
 Next, in priority order:
 
 - [ ] 90-second demo video
-- [ ] GitHub Action for automated PR comparison
+- [x] GitHub Action for automated PR comparison
 - [ ] Controlled experiments, minimal reproduction, and verified test generation
 - [ ] Real-world validation against external repositories and regression commits
 - [ ] CLI observer for stdout/stderr/exit codes

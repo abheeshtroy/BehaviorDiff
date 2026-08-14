@@ -1,0 +1,139 @@
+name: BehaviorDiff
+description: Compare the behavior of two Git refs using a BehaviorDiff manifest.
+inputs:
+  manifest:
+    description: Path to the BehaviorDiff manifest in the caller repository.
+    required: false
+    default: behaviordiff.yaml
+  base-ref:
+    description: Git ref for the base version.
+    required: true
+  target-ref:
+    description: Git ref for the target version.
+    required: true
+  fail-on-findings:
+    description: Fail the job when the comparison returns findings.
+    required: false
+    default: "false"
+  python-version:
+    description: Python version used to install and run BehaviorDiff.
+    required: false
+    default: "3.12"
+  upload-artifact-name:
+    description: Artifact name used by the example workflow when uploading results.
+    required: false
+    default: behaviordiff-results
+outputs:
+  results-dir:
+    description: Directory containing result.json and summary.md for upload.
+    value: ${{ steps.paths.outputs.results-dir }}
+  artifact_name:
+    description: Artifact name requested by the caller.
+    value: ${{ inputs.upload-artifact-name }}
+runs:
+  using: composite
+  steps:
+    - name: Set up Python
+      id: setup-python
+      continue-on-error: true
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Run BehaviorDiff
+      id: run
+      shell: bash
+      env:
+        BD_MANIFEST: ${{ inputs.manifest }}
+        BD_BASE_REF: ${{ inputs.base-ref }}
+        BD_TARGET_REF: ${{ inputs.target-ref }}
+        BD_ACTION_PATH: ${{ github.action_path }}
+        BD_PYTHON_SETUP: ${{ steps.setup-python.outcome }}
+      run: |
+        set +e
+        mkdir -p "$GITHUB_WORKSPACE/.behaviordiff-results"
+        printf '%s\n' '{}' > "$GITHUB_WORKSPACE/.behaviordiff-results/result.json"
+
+        if [ "$BD_PYTHON_SETUP" != "success" ]; then
+          echo "BehaviorDiff setup failure: Python setup did not complete." >&2
+          echo "2" > "$GITHUB_WORKSPACE/.behaviordiff-results/status"
+          exit 0
+        fi
+
+        docker version >/dev/null 2>&1
+        docker_status=$?
+        if [ "$docker_status" -ne 0 ]; then
+          echo "BehaviorDiff setup failure: Docker is unavailable or the daemon is not running." >&2
+          echo "2" > "$GITHUB_WORKSPACE/.behaviordiff-results/status"
+          exit 0
+        fi
+
+        python -m pip install --disable-pip-version-check --quiet "$BD_ACTION_PATH"
+        install_status=$?
+        if [ "$install_status" -ne 0 ]; then
+          echo "BehaviorDiff setup failure: could not install the action source." >&2
+          echo "2" > "$GITHUB_WORKSPACE/.behaviordiff-results/status"
+          exit 0
+        fi
+
+        behaviordiff "$BD_MANIFEST" \
+          --base-ref "$BD_BASE_REF" \
+          --target-ref "$BD_TARGET_REF" \
+          --json > "$GITHUB_WORKSPACE/.behaviordiff-results/result.json"
+        comparison_status=$?
+        if [ "$comparison_status" -gt 2 ]; then
+          comparison_status=2
+        fi
+        printf '%s\n' "$comparison_status" > "$GITHUB_WORKSPACE/.behaviordiff-results/status"
+        exit 0
+
+    - name: Write BehaviorDiff summary
+      id: paths
+      if: always()
+      shell: bash
+      env:
+        BD_RESULTS_DIR: ${{ github.workspace }}/.behaviordiff-results
+      run: |
+        python - <<'PY'
+        import json
+        import os
+        from pathlib import Path
+
+        directory = Path(os.environ["BD_RESULTS_DIR"])
+        directory.mkdir(parents=True, exist_ok=True)
+        result_path = directory / "result.json"
+        summary_path = directory / "summary.md"
+        try:
+            payload = json.loads(result_path.read_text())
+            findings = payload.get("findings", [])
+            workflows = payload.get("metadata", {}).get("total_workflows", "unknown")
+            text = (
+                "## BehaviorDiff\n\n"
+                f"- Findings: **{len(findings)}**\n"
+                f"- Workflows: **{workflows}**\n"
+                f"- JSON result: `{result_path}`\n"
+            )
+        except (OSError, json.JSONDecodeError) as exc:
+            text = f"## BehaviorDiff\n\nComparison setup failed: `{exc}`\n"
+            (directory / "status").write_text("2\n")
+        summary_path.write_text(text)
+        summary_file = os.environ.get("GITHUB_STEP_SUMMARY")
+        if summary_file:
+            with Path(summary_file).open("a") as stream:
+                stream.write(text)
+        with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+            output.write(f"results-dir={directory}\n")
+        PY
+
+    - name: Enforce BehaviorDiff result
+      if: always()
+      shell: bash
+      env:
+        BD_FAIL_ON_FINDINGS: ${{ inputs.fail-on-findings }}
+        BD_RESULTS_DIR: ${{ github.workspace }}/.behaviordiff-results
+      run: |
+        status="$(cat "$BD_RESULTS_DIR/status" 2>/dev/null || echo 2)"
+        if [ "$status" = "1" ] && [ "$BD_FAIL_ON_FINDINGS" != "true" ]; then
+          exit 0
+        fi
+        exit "$status"
