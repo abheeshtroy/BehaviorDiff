@@ -29,5 +29,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.behaviordiff.outputs.artifact_name }}
-          path: .behaviordiff-results/
+          path: behaviordiff-results/
           if-no-files-found: warn

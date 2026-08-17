@@ -198,7 +198,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: behaviordiff-results
-          path: .behaviordiff-results/
+          path: behaviordiff-results/
 ```
 
 The repository also contains this consumer-ready example at
@@ -231,6 +231,8 @@ directory relative to the manifest (default `.`); `compare.base_ref` and
 optional JSON bodies and captures. Optional `database` config observes
 Postgres tables, `outbound` config mocks external HTTP services, and
 `normalize` suppresses measured nondeterminism. Unknown keys are rejected.
+Capture selectors must name a response-body field, such as `$.cart_id`; whole-response
+selectors `$` and `$.` are not supported.
 
 ### Action inputs and behavior
 
@@ -238,7 +240,7 @@ The composite action accepts `manifest` (`behaviordiff.yaml`), required
 `base-ref` and `target-ref`, `fail-on-findings` (`false`), `python-version`
 (`3.12`), and `upload-artifact-name` (`behaviordiff-results`). The last input is
 the artifact-name convention for the caller workflow; the action always writes
-`.behaviordiff-results/result.json` and `summary.md` for upload.
+`behaviordiff-results/result.json` and `summary.md` for upload.
 
 It installs BehaviorDiff from the action's own source directory, verifies that
 Docker is available, and runs against the checked-out caller repository. Docker

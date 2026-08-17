@@ -51,12 +51,12 @@ runs:
         BD_PYTHON_SETUP: ${{ steps.setup-python.outcome }}
       run: |
         set +e
-        mkdir -p "$GITHUB_WORKSPACE/.behaviordiff-results"
-        printf '%s\n' '{}' > "$GITHUB_WORKSPACE/.behaviordiff-results/result.json"
+        mkdir -p "$GITHUB_WORKSPACE/behaviordiff-results"
+        printf '%s\n' '{}' > "$GITHUB_WORKSPACE/behaviordiff-results/result.json"
 
         if [ "$BD_PYTHON_SETUP" != "success" ]; then
           echo "BehaviorDiff setup failure: Python setup did not complete." >&2
-          echo "2" > "$GITHUB_WORKSPACE/.behaviordiff-results/status"
+          echo "2" > "$GITHUB_WORKSPACE/behaviordiff-results/status"
           exit 0
         fi
 
@@ -64,7 +64,7 @@ runs:
         docker_status=$?
         if [ "$docker_status" -ne 0 ]; then
           echo "BehaviorDiff setup failure: Docker is unavailable or the daemon is not running." >&2
-          echo "2" > "$GITHUB_WORKSPACE/.behaviordiff-results/status"
+          echo "2" > "$GITHUB_WORKSPACE/behaviordiff-results/status"
           exit 0
         fi
 
@@ -72,19 +72,19 @@ runs:
         install_status=$?
         if [ "$install_status" -ne 0 ]; then
           echo "BehaviorDiff setup failure: could not install the action source." >&2
-          echo "2" > "$GITHUB_WORKSPACE/.behaviordiff-results/status"
+          echo "2" > "$GITHUB_WORKSPACE/behaviordiff-results/status"
           exit 0
         fi
 
         behaviordiff "$BD_MANIFEST" \
           --base-ref "$BD_BASE_REF" \
           --target-ref "$BD_TARGET_REF" \
-          --json > "$GITHUB_WORKSPACE/.behaviordiff-results/result.json"
+          --json > "$GITHUB_WORKSPACE/behaviordiff-results/result.json"
         comparison_status=$?
         if [ "$comparison_status" -gt 2 ]; then
           comparison_status=2
         fi
-        printf '%s\n' "$comparison_status" > "$GITHUB_WORKSPACE/.behaviordiff-results/status"
+        printf '%s\n' "$comparison_status" > "$GITHUB_WORKSPACE/behaviordiff-results/status"
         exit 0
 
     - name: Write BehaviorDiff summary
@@ -92,7 +92,7 @@ runs:
       if: always()
       shell: bash
       env:
-        BD_RESULTS_DIR: ${{ github.workspace }}/.behaviordiff-results
+        BD_RESULTS_DIR: ${{ github.workspace }}/behaviordiff-results
       run: |
         python - <<'PY'
         import json
@@ -130,7 +130,7 @@ runs:
       shell: bash
       env:
         BD_FAIL_ON_FINDINGS: ${{ inputs.fail-on-findings }}
-        BD_RESULTS_DIR: ${{ github.workspace }}/.behaviordiff-results
+        BD_RESULTS_DIR: ${{ github.workspace }}/behaviordiff-results
       run: |
         status="$(cat "$BD_RESULTS_DIR/status" 2>/dev/null || echo 2)"
         if [ "$status" = "1" ] && [ "$BD_FAIL_ON_FINDINGS" != "true" ]; then
