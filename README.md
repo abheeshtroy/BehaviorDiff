@@ -254,6 +254,28 @@ means setup or orchestration failure. The Action only fails the job for status
 The JSON and Markdown files remain available for an `if: always()` artifact
 upload even when findings are present.
 
+### Offline BehaviorDiff Review
+
+Pass `--report` to write an interactive, self-contained review alongside the
+normal CLI output:
+
+```bash
+behaviordiff behaviordiff.yaml --report behaviordiff-results/report.html
+```
+
+`report.html` contains the real comparison evidence and opens directly from
+disk without a server or network access. The GitHub Action writes the same
+review and a redacted `behaviordiff-results/result.json` into the artifact
+directory automatically. Both use the same redaction policy for common
+secret-like field names and headers (including
+authorization, cookies, passwords, tokens, API keys, and session IDs), bearer
+credentials, and secret-like URL query parameters. In contrast, local CLI
+`behaviordiff manifest.yaml --json` remains the canonical raw machine-readable
+result and is not automatically a secret-management boundary. This is defense
+in depth: normalization and ignore rules are not a complete privacy boundary,
+so review artifacts should still be handled according to your project's data
+policy.
+
 The example uses the standard `pull_request` event. Fork pull requests run with
 the fork's head SHA and the base SHA supplied by GitHub, but do not receive
 repository secrets; this workflow does not need secrets, does not comment on

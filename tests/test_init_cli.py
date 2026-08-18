@@ -375,3 +375,53 @@ def test_main_json_findings_keep_exit_code_one(monkeypatch, capsys):
     assert cli.main() == 1
     payload = json.loads(capsys.readouterr().out)
     assert len(payload["findings"]) == 1
+
+
+def test_main_json_keeps_local_evidence_raw(monkeypatch, capsys):
+    result = ComparisonResult(
+        findings=[
+            {
+                "category": "http",
+                "summary": "credentials observed",
+                "severity": "changed",
+                "evidence_base": {
+                    "headers": {"Authorization": "Bearer top-secret"},
+                    "url": "https://example.test/?api_key=key-secret",
+                    "details": {"nested_token": "token-secret", "password": "password-secret"},
+                },
+            }
+        ],
+        metadata={"total_workflows": 1, "total_steps": 1, "duration_seconds": 0},
+    )
+    _stub_completed_run(monkeypatch, result)
+    monkeypatch.setattr("sys.argv", ["behaviordiff", "manifest.yaml", "--json"])
+
+    assert cli.main() == 1
+    serialized = capsys.readouterr().out
+    payload = json.loads(serialized)
+    assert payload["findings"][0]["evidence_base"]["headers"]["Authorization"] == "Bearer top-secret"
+    for secret in ("key-secret", "token-secret", "password-secret"):
+        assert secret in serialized
+
+
+def test_main_writes_a_report_from_the_same_completed_payload(monkeypatch, tmp_path):
+    result = ComparisonResult(
+        findings=[
+            {
+                "category": "http",
+                "summary": "GET /quote: body changed",
+                "severity": "changed",
+                "evidence_base": {"body": {"currency": "USD"}},
+                "evidence_target": {"body": {"currency": "EUR"}},
+            }
+        ],
+        metadata={"total_workflows": 1, "total_steps": 1, "duration_seconds": 0},
+    )
+    _stub_completed_run(monkeypatch, result)
+    report = tmp_path / "review.html"
+    monkeypatch.setattr("sys.argv", ["behaviordiff", "manifest.yaml", "--report", str(report), "--json"])
+
+    assert cli.main() == 1
+    text = report.read_text()
+    assert "BehaviorDiff Review" in text
+    assert "USD" in text and "EUR" in text

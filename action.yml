@@ -25,7 +25,7 @@ inputs:
     default: behaviordiff-results
 outputs:
   results-dir:
-    description: Directory containing result.json and summary.md for upload.
+    description: Directory containing result.json, report.html, and summary.md for upload.
     value: ${{ steps.paths.outputs.results-dir }}
   artifact_name:
     description: Artifact name requested by the caller.
@@ -53,6 +53,8 @@ runs:
         set +e
         mkdir -p "$GITHUB_WORKSPACE/behaviordiff-results"
         printf '%s\n' '{}' > "$GITHUB_WORKSPACE/behaviordiff-results/result.json"
+        raw_result="$(mktemp "${RUNNER_TEMP:-/tmp}/behaviordiff-result.XXXXXX")"
+        trap 'rm -f "$raw_result"' EXIT
 
         if [ "$BD_PYTHON_SETUP" != "success" ]; then
           echo "BehaviorDiff setup failure: Python setup did not complete." >&2
@@ -79,8 +81,22 @@ runs:
         behaviordiff "$BD_MANIFEST" \
           --base-ref "$BD_BASE_REF" \
           --target-ref "$BD_TARGET_REF" \
-          --json > "$GITHUB_WORKSPACE/behaviordiff-results/result.json"
+          --report "$GITHUB_WORKSPACE/behaviordiff-results/report.html" \
+          --json > "$raw_result"
         comparison_status=$?
+        python - "$raw_result" "$GITHUB_WORKSPACE/behaviordiff-results/result.json" <<'PY'
+        import json
+        import sys
+        from pathlib import Path
+
+        from engine.report import write_sanitized_json
+
+        raw_path, artifact_path = map(Path, sys.argv[1:])
+        write_sanitized_json(artifact_path, json.loads(raw_path.read_text(encoding="utf-8")))
+        PY
+        if [ "$?" -ne 0 ]; then
+          comparison_status=2
+        fi
         if [ "$comparison_status" -gt 2 ]; then
           comparison_status=2
         fi
@@ -111,6 +127,7 @@ runs:
                 "## BehaviorDiff\n\n"
                 f"- Findings: **{len(findings)}**\n"
                 f"- Workflows: **{workflows}**\n"
+                f"- Interactive review: `{directory / 'report.html'}`\n"
                 f"- JSON result: `{result_path}`\n"
             )
         except (OSError, json.JSONDecodeError) as exc:

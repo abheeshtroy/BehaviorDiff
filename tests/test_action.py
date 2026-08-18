@@ -12,8 +12,16 @@ def test_action_uses_a_non_hidden_results_directory() -> None:
 
     assert ".behaviordiff-results" not in action
     assert f'$GITHUB_WORKSPACE/{RESULTS_DIR}/result.json' in action
+    assert '--json > "$raw_result"' in action
+    assert "mktemp \"${RUNNER_TEMP:-/tmp}/behaviordiff-result.XXXXXX\"" in action
+    assert "from engine.report import write_sanitized_json" in action
+    assert "write_sanitized_json(artifact_path, json.loads(raw_path.read_text(encoding=\"utf-8\")))" in action
+    assert f'--json > "$GITHUB_WORKSPACE/{RESULTS_DIR}/result.json"' not in action
+    assert "trap 'rm -f \"$raw_result\"' EXIT" in action
     assert action.count("${{ github.workspace }}/" + RESULTS_DIR) == 2
-    assert "results-dir=${directory}" in action
+    assert "results-dir={directory}" in action
+    assert f'$GITHUB_WORKSPACE/{RESULTS_DIR}/report.html' in action
+    assert "Interactive review" in action
 
 
 def test_artifact_upload_examples_match_action_results_directory() -> None:

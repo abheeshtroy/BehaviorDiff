@@ -16,6 +16,7 @@ from ai.manifest_gen import ManifestGenerationError, generate_manifest, scan_rep
 from ai.workflow_gen import WorkflowProposal
 from engine.manifest import load_manifest, ManifestError
 from engine.pipeline import RunEvent, run_pipeline
+from engine.report import write_report
 
 log = structlog.get_logger(__name__)
 
@@ -66,6 +67,11 @@ def main() -> int:
         action="store_true",
         dest="json_output",
         help="Output results as JSON instead of human-readable text.",
+    )
+    parser.add_argument(
+        "--report",
+        type=Path,
+        help="Write a self-contained offline BehaviorDiff Review HTML file.",
     )
     parser.add_argument(
         "--verbose", "-v",
@@ -177,12 +183,12 @@ def main() -> int:
         return 2
 
     if terminal.stage == "error":
-        return _report_error(terminal)
+        return _report_error(terminal, args)
 
     return _report_result(terminal, args)
 
 
-def _report_error(event: RunEvent) -> int:
+def _report_error(event: RunEvent, args=None) -> int:
     """Render a failed run.
 
     Orchestrator and runner failures are the CLI's own error message and exit
@@ -191,6 +197,8 @@ def _report_error(event: RunEvent) -> int:
     """
     if not event.data["expected"]:
         raise event.data["exception"]
+    if getattr(args, "report", None):
+        _write_report(args.report, {"error": event.data["error"]})
     print(f"Error: {event.data['error']}", file=sys.stderr)
     return 2
 
@@ -203,14 +211,11 @@ def _report_result(event: RunEvent, args) -> int:
     classification = models["classification"]
     proposal = models["proposal"]
 
+    payload = _result_payload(event, intent, classification, proposal)
+    if getattr(args, "report", None):
+        _write_report(args.report, payload)
+
     if args.json_output:
-        payload = dict(event.data["result"])
-        if intent is not None:
-            payload["intent"] = event.data["intent"]
-        if classification is not None:
-            payload["classification"] = event.data["classification"]
-        if proposal is not None:
-            payload["proposed_workflows"] = event.data["proposed_workflows"]
         print(json.dumps(payload, indent=2))
     else:
         _print_human(
@@ -222,6 +227,26 @@ def _report_result(event: RunEvent, args) -> int:
         )
 
     return 0 if not result.findings else 1
+
+
+def _result_payload(event: RunEvent, intent, classification, proposal) -> dict:
+    """The one structured result shared by --json and --report."""
+    payload = dict(event.data["result"])
+    if intent is not None:
+        payload["intent"] = event.data["intent"]
+    if classification is not None:
+        payload["classification"] = event.data["classification"]
+    if proposal is not None:
+        payload["proposed_workflows"] = event.data["proposed_workflows"]
+    return payload
+
+
+def _write_report(path: Path, payload: dict) -> None:
+    try:
+        write_report(path, payload)
+    except OSError as exc:
+        # A review artifact must not make the underlying comparison look clean.
+        print(f"Warning: could not write report {path}: {exc}", file=sys.stderr)
 
 
 def _run_init(args) -> int:
