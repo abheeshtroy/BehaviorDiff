@@ -84,7 +84,27 @@ Dashboard (web/frontend/)
        React SPA: findings, sequence diagram, blast radius, timeline
 ```
 
+## Install
+
+BehaviorDiff requires Python 3.12 or later.
+
+```bash
+python -m pip install behaviordiff
+behaviordiff --help
+```
+
 ## Quick start
+
+### What a v1 comparison needs
+
+BehaviorDiff v1 compares a Dockerized HTTP application at two Git refs. To
+run a comparison, you need a manifest, two reachable Git refs for the app, and
+at least one workflow made of ordered HTTP request steps. Docker must be
+installed, running, and allowed to build images and start containers.
+
+Postgres observation and outbound-service mocking are optional manifest
+features. An `ANTHROPIC_API_KEY` is only needed for `--init` and other
+AI-assisted features; deterministic comparisons do not require it.
 
 ### 1. Generate a manifest
 
@@ -92,12 +112,26 @@ Point BehaviorDiff at any repo with a Dockerfile and HTTP routes:
 
 ```bash
 export ANTHROPIC_API_KEY="sk-ant-..."
-python cli.py --init ./your-app --base-ref main --target-ref your-branch
+behaviordiff --init ./your-app --base-ref main --target-ref your-branch
 ```
 
 It scans the repo, reads the route handlers, and writes a `behaviordiff.yaml` with workflows that match the actual request schemas.
 
-### 2. Build the demo repository
+You can also write a manifest yourself; see the [manifest contract](#manifest-contract).
+
+### 2. Run a comparison
+
+```bash
+behaviordiff behaviordiff.yaml
+```
+
+BehaviorDiff builds and runs each ref under the conditions in the manifest,
+then compares the configured observations.
+
+### Development demo (source checkout only)
+
+The following demo setup is for contributors working from a source checkout.
+It creates the generated demo repository used by the checked-in manifests.
 
 ```bash
 python demo/build_demo_repo.py
@@ -113,7 +147,7 @@ That's all the setup a full run needs — the engine builds an image per ref,
 starts a Postgres per version, and tears it all down afterwards:
 
 ```bash
-python cli.py demo/manifests/scenario1-checkout-validation.yaml
+behaviordiff demo/manifests/scenario1-checkout-validation.yaml
 ```
 
 Or trigger it from the dashboard at `/runs/new` and watch the events stream in.
@@ -150,7 +184,7 @@ either one and the containers come back up with the previous behavior, silently.
 Then:
 
 ```bash
-python cli.py demo/manifests/scenario1-checkout-validation.yaml \
+behaviordiff demo/manifests/scenario1-checkout-validation.yaml \
   --base-url http://localhost:8001 \
   --target-url http://localhost:8002 \
   --base-pg-dsn "postgresql://postgres:postgres@localhost:55432/shop" \
@@ -163,7 +197,7 @@ python cli.py demo/manifests/scenario1-checkout-validation.yaml \
 ```bash
 git diff main..fix/checkout-validation > /tmp/change.diff
 
-python cli.py manifest.yaml \
+behaviordiff manifest.yaml \
   --base-url http://localhost:8001 \
   --target-url http://localhost:8002 \
   --diff /tmp/change.diff \
@@ -175,8 +209,9 @@ Each finding gets labeled `[intended]`, `[suspicious]`, or `[noise]` with reason
 ## GitHub Action
 
 BehaviorDiff can run in another repository's pull-request workflow. Add the
-manifest and workflow below (pin `@<ref>` to a release or commit when using the
-action from another repository):
+manifest and workflow below. This example uses the stable `v0.1.0` tag; for
+stronger supply-chain pinning, replace it with that release's immutable commit
+SHA.
 
 ```yaml
 name: BehaviorDiff
@@ -189,7 +224,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: abheeshtroy/BehaviorDiff@<ref>
+      - uses: abheeshtroy/BehaviorDiff@v0.1.0
         with:
           manifest: behaviordiff.yaml
           base-ref: ${{ github.event.pull_request.base.sha }}

@@ -33,6 +33,18 @@ jobs:
       - name: Run Python tests
         run: python -m pytest -q
 
+      - name: Build distribution artifacts
+        run: python -m pip install build twine && python -m build --outdir dist
+
+      - name: Validate distribution metadata
+        run: python -m twine check dist/*
+
+      - name: Smoke test wheel install
+        run: |
+          python -m venv "$RUNNER_TEMP/behaviordiff-wheel-smoke"
+          "$RUNNER_TEMP/behaviordiff-wheel-smoke/bin/python" -m pip install dist/*.whl
+          "$RUNNER_TEMP/behaviordiff-wheel-smoke/bin/behaviordiff" --help
+
   frontend:
     name: Frontend
     runs-on: ubuntu-latest

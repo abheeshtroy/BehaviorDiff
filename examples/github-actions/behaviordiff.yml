@@ -17,7 +17,7 @@ jobs:
 
       - name: Run BehaviorDiff
         id: behaviordiff
-        uses: abheeshtroy/BehaviorDiff@<ref>
+        uses: abheeshtroy/BehaviorDiff@v0.1.0
         with:
           manifest: behaviordiff.yaml
           base-ref: ${{ github.event.pull_request.base.sha }}

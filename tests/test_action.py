@@ -29,3 +29,8 @@ def test_artifact_upload_examples_match_action_results_directory() -> None:
         text = path.read_text()
         assert ".behaviordiff-results" not in text
         assert f"path: {RESULTS_DIR}/" in text
+
+
+def test_action_examples_use_the_stable_release_tag() -> None:
+    for path in (ROOT / "README.md", ROOT / "examples/github-actions/behaviordiff.yml"):
+        assert "abheeshtroy/BehaviorDiff@v0.1.0" in path.read_text()

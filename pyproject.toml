@@ -3,8 +3,16 @@ name = "behaviordiff"
 version = "0.1.0"
 description = "Compare the behavior of two versions of an application."
 readme = "README.md"
-license = { text = "MIT" }
+license = "MIT"
 requires-python = ">=3.12"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Operating System :: OS Independent",
+    "Topic :: Software Development :: Testing",
+]
 dependencies = [
     "pydantic>=2",
     "pyyaml>=6",
@@ -17,6 +25,11 @@ dependencies = [
     "uvicorn>=0.34",
     "websockets>=13",
 ]
+
+[project.urls]
+Homepage = "https://github.com/abheeshtroy/BehaviorDiff"
+Repository = "https://github.com/abheeshtroy/BehaviorDiff"
+Issues = "https://github.com/abheeshtroy/BehaviorDiff/issues"
 
 [project.scripts]
 behaviordiff = "cli:main"
