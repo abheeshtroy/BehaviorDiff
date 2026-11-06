@@ -10,27 +10,6 @@ See BehaviorDiff detect unintended changes in checkout behavior, including an un
 
 https://github.com/user-attachments/assets/daa9bcf0-c1a5-44b2-9287-6eba7ca1141c
 
-```
-$ behaviordiff manifest.yaml \
-    --base-url http://localhost:8001 \
-    --target-url http://localhost:8002 \
-    --base-pg-dsn "postgresql://...@localhost:55432/shop" \
-    --target-pg-dsn "postgresql://...@localhost:55433/shop"
-
-  4 finding(s):
-
-  [~] http | POST /api/carts: headers changed: date
-      workflow: checkout-with-discount-and-invalid-address, step 0
-
-  [~] http | POST /api/checkout: status 500 -> 400; body changed
-      workflow: checkout-with-discount-and-invalid-address, step 2
-
-  [+] postgres | row inserted into carts
-  [-] postgres | row deleted from carts
-
-  Ran 1 workflow(s), 3 step(s) in 0.18s
-```
-
 ## What it does
 
 You point BehaviorDiff at two running versions of the same app (base and target), give it a manifest describing what to test and what to observe, and it tells you exactly what's different — with raw evidence, not assertions.
@@ -536,4 +515,5 @@ Current status and planned improvements:
 ## License
 
 MIT
+
 
