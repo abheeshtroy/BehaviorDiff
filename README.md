@@ -4,6 +4,12 @@ A change-aware differential testing engine. Run two versions of an application u
 
 **AI proposes, deterministic code verifies.** The engine produces correct findings without AI. AI improves coverage and classification.
 
+## Demo
+
+See BehaviorDiff detect unintended changes in checkout behavior, including an unexpected payment authorization and a cleared discount.
+
+https://github.com/user-attachments/assets/daa9bcf0-c1a5-44b2-9287-6eba7ca1141c
+
 ```
 $ behaviordiff manifest.yaml \
     --base-url http://localhost:8001 \
