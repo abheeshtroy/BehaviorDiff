@@ -273,7 +273,10 @@ optional JSON bodies and captures. Optional `database` config observes
 Postgres tables, `outbound` config mocks external HTTP services, and
 `normalize` suppresses measured nondeterminism. Unknown keys are rejected.
 Capture selectors must name a response-body field, such as `$.cart_id`; whole-response
-selectors `$` and `$.` are not supported.
+selectors `$` and `$.` are not supported. Both the selector and the capture name
+are checked when the manifest is read, so a selector the runner cannot walk (an
+array index, say) or a name that can never be substituted as `{name}` fails
+before any image is built.
 
 ### Action inputs and behavior
 
@@ -444,6 +447,25 @@ behaviordiff manifest.yaml --diff change.diff --generate-workflows  # AI workflo
 | `--json` | Machine-readable JSON output |
 | `--verbose` / `-v` | Show raw evidence for each finding |
 
+### What a finding contains
+
+Every finding names the workflow step it came from, carries the evidence from
+both versions, and — for a structured surface (an HTTP body, a database row) —
+says *where* the values differ in `changed_paths`, using the same dot-and-index
+notation the manifest and the normalizer use (`total`, `items[0].qty`,
+`order.customer.name`). The summary names the first few, so the difference is
+readable without opening the evidence:
+
+```
+[~] http | POST /api/checkout: status 200 -> 400; body changed at total, items[0].qty
+[~] postgres | row modified in orders (pk={'id': 7}): status
+```
+
+Paths are computed from the normalized values, so a field the manifest ignores,
+a remapped UUID, or floating-point jitter never shows up as one. A difference
+that replaced the whole body (an object that became an array, say) has no field
+to name and reads `body changed at the whole value`.
+
 ## Project structure
 
 ```
@@ -453,6 +475,7 @@ engine/
   runner.py            # Workflow execution with dual-track capture
   normalizer.py        # Noise suppression
   comparator.py        # Unified diff → structured findings
+  structure.py         # Where two captured values differ (finding paths)
   observers/
     http.py            # HTTP response observation and diffing
     postgres.py        # DB snapshot, row-level diff, delta-of-deltas
@@ -479,7 +502,7 @@ demo/
   manifests/           # Hand-written manifests for each scenario
   docker-compose.yaml  # Two app versions + two Postgres + payment mock
 
-tests/                 # 340+ Python tests, all passing
+tests/                 # 400+ Python tests, all passing
 ```
 
 ## Tech stack
@@ -492,7 +515,7 @@ tests/                 # 340+ Python tests, all passing
 - Anthropic API (Claude Sonnet 4.6) for AI features
 - FastAPI + SQLite for the web API and run storage
 - React + Vite for the dashboard
-- pytest for the engine (340+ tests), vitest for the frontend (130+ tests)
+- pytest for the engine (400+ tests), vitest for the frontend (130+ tests)
 
 ## Roadmap
 

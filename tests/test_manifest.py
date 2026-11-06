@@ -401,3 +401,46 @@ class TestPathAnchoring:
 
         assert manifest.source_path is None
         assert "source_path" not in manifest.model_dump()
+
+
+class TestCaptureSelectors:
+    """Capture selectors and names fail at parse time, not after a Docker build."""
+
+    def test_nested_selector_is_accepted(self) -> None:
+        data = _valid_manifest_dict()
+        data["workflows"][0]["steps"][0]["capture"] = {"city": "$.address.city"}
+
+        manifest = parse_manifest(data)
+
+        assert manifest.workflows[0].steps[0].capture == {"city": "$.address.city"}
+
+    def test_selector_without_dollar_dot_raises(self) -> None:
+        data = _valid_manifest_dict()
+        data["workflows"][0]["steps"][0]["capture"] = {"cart_id": "cart_id"}
+
+        with pytest.raises(ManifestError, match=r"\$\.cart_id"):
+            parse_manifest(data)
+
+    def test_whole_response_selector_raises(self) -> None:
+        for selector in ("$", "$."):
+            data = _valid_manifest_dict()
+            data["workflows"][0]["steps"][0]["capture"] = {"body": selector}
+
+            with pytest.raises(ManifestError, match="selector"):
+                parse_manifest(data)
+
+    def test_array_index_selector_raises(self) -> None:
+        data = _valid_manifest_dict()
+        data["workflows"][0]["steps"][0]["capture"] = {"sku": "$.items[0].sku"}
+
+        with pytest.raises(ManifestError, match="array indices"):
+            parse_manifest(data)
+
+    def test_capture_name_that_cannot_be_substituted_raises(self) -> None:
+        # "{cart-id}" is never matched by the runner's {name} pattern, so the
+        # captured value could never be used.
+        data = _valid_manifest_dict()
+        data["workflows"][0]["steps"][0]["capture"] = {"cart-id": "$.cart_id"}
+
+        with pytest.raises(ManifestError, match="cart-id"):
+            parse_manifest(data)

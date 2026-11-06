@@ -7,6 +7,7 @@ hardcoded here — every detail comes from the parsed manifest.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any, Literal
 
@@ -23,6 +24,16 @@ from pydantic import (
 )
 
 _HTTP_METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"}
+
+# A captured variable is substituted back into later steps as {name}, so its
+# name has to be something the runner's "{name}" pattern can match.
+_CAPTURE_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+# A capture selector names fields in a response body: "$.cart_id",
+# "$.address.city". The runner walks dict keys only, so array indices and the
+# whole-response selectors "$" / "$." cannot be expressed here — they are
+# rejected when the manifest is read rather than after the images are built.
+_CAPTURE_SELECTOR_RE = re.compile(r"^\$\.[^.\[\]\s]+(\.[^.\[\]\s]+)*$")
 
 
 class ManifestError(Exception):
@@ -161,6 +172,32 @@ class WorkflowStep(StrictModel):
     def path_is_absolute(cls, value: str) -> str:
         if not value.startswith("/"):
             raise ValueError(f"must start with '/', got {value!r}")
+        return value
+
+    @field_validator("capture")
+    @classmethod
+    def capture_selectors_are_resolvable(cls, value: dict[str, str] | None) -> dict[str, str] | None:
+        """Reject captures the runner could never resolve or substitute.
+
+        Both halves fail silently at runtime otherwise: a selector the runner
+        cannot walk raises only after Docker has built and started both
+        versions, and a name that does not match "{name}" captures a value no
+        later step can ever substitute.
+        """
+        if value is None:
+            return value
+        for name, selector in value.items():
+            if not _CAPTURE_NAME_RE.match(name):
+                raise ValueError(
+                    f"capture name {name!r} must be a valid variable name "
+                    "(letters, digits and underscores, not starting with a digit)"
+                )
+            if not _CAPTURE_SELECTOR_RE.match(selector):
+                raise ValueError(
+                    f"capture {name!r}: selector {selector!r} must name a response-body "
+                    "field, e.g. '$.cart_id' or '$.address.city' (array indices and the "
+                    "whole-response selectors '$' and '$.' are not supported)"
+                )
         return value
 
 
