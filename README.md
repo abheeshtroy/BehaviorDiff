@@ -134,6 +134,29 @@ behaviordiff behaviordiff.yaml
 BehaviorDiff builds and runs each ref under the conditions in the manifest,
 then compares the configured observations.
 
+#### Example CLI output
+
+```
+$ behaviordiff manifest.yaml \
+    --base-url http://localhost:8001 \
+    --target-url http://localhost:8002 \
+    --base-pg-dsn "postgresql://...@localhost:55432/shop" \
+    --target-pg-dsn "postgresql://...@localhost:55433/shop"
+
+  4 finding(s):
+
+  [~] http | POST /api/carts: headers changed: date
+      workflow: checkout-with-discount-and-invalid-address, step 0
+
+  [~] http | POST /api/checkout: status 500 -> 400; body changed
+      workflow: checkout-with-discount-and-invalid-address, step 2
+
+  [+] postgres | row inserted into carts
+  [-] postgres | row deleted from carts
+
+  Ran 1 workflow(s), 3 step(s) in 0.18s
+```
+
 ### Development demo (source checkout only)
 
 The following demo setup is for contributors working from a source checkout.
@@ -499,9 +522,9 @@ tests/                 # 340+ Python tests, all passing
 Core engine, web dashboard, benchmark harness, public demo deployment, Python
 packaging, and CI validation are complete.
 
-Next, in priority order:
+Current status and planned improvements:
 
-- [ ] 90-second demo video
+- [x] Product demo video (49 seconds)
 - [x] GitHub Action for automated PR comparison
 - [ ] Controlled experiments, minimal reproduction, and verified test generation
 - [ ] Real-world validation against external repositories and regression commits
@@ -513,3 +536,4 @@ Next, in priority order:
 ## License
 
 MIT
+
