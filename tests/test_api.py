@@ -13,7 +13,8 @@ from fastapi.testclient import TestClient
 
 from engine.pipeline import RunEvent
 from web import run_registry
-from web.api import WS_UNKNOWN_RUN, app
+from web import api as web_api
+from web.api import WS_UNKNOWN_RUN, app, resolve_static_file
 from web.store import save_run
 
 
@@ -408,3 +409,58 @@ def test_streaming_an_unknown_run_id_reaches_the_client_as_4004():
         with tc.websocket_connect("/api/runs/nope/stream") as websocket:
             websocket.receive_json()
     assert excinfo.value.code == WS_UNKNOWN_RUN
+
+
+# -- built frontend files ------------------------------------------------------
+#
+# The catch-all SPA route reads from the built frontend, and the request path is
+# attacker-controlled, so "which file does this path mean" is tested directly
+# rather than by building a frontend in the tree.
+
+
+@pytest.fixture()
+def dist_dir(tmp_path, monkeypatch):
+    dist = tmp_path / "dist"
+    (dist / "assets").mkdir(parents=True)
+    (dist / "index.html").write_text("<!doctype html><title>spa</title>")
+    (dist / "assets" / "app.js").write_text("console.log('app')")
+    monkeypatch.setattr(web_api, "DIST_DIR", dist)
+    return dist
+
+
+def test_resolve_static_file_serves_a_file_inside_the_build(dist_dir):
+    assert resolve_static_file("index.html") == (dist_dir / "index.html").resolve()
+    assert resolve_static_file("assets/app.js") == (dist_dir / "assets" / "app.js").resolve()
+
+
+def test_resolve_static_file_returns_none_for_a_path_that_is_not_a_file(dist_dir):
+    assert resolve_static_file("runs/abc123") is None
+    assert resolve_static_file("assets/missing.js") is None
+    assert resolve_static_file("") is None
+
+
+def test_resolve_static_file_refuses_to_climb_out_of_the_build(dist_dir, tmp_path):
+    (tmp_path / "secret.txt").write_text("SECRET")
+
+    assert resolve_static_file("../secret.txt") is None
+    assert resolve_static_file("../../../../../../../etc/passwd") is None
+
+
+def test_resolve_static_file_refuses_an_absolute_path(dist_dir):
+    # Path("dist") / "/etc/passwd" is "/etc/passwd": joining resets to the root.
+    assert resolve_static_file("/etc/passwd") is None
+
+
+def test_resolve_static_file_refuses_a_symlink_out_of_the_build(dist_dir, tmp_path):
+    outside = tmp_path / "outside.txt"
+    outside.write_text("SECRET")
+    (dist_dir / "linked.txt").symlink_to(outside)
+
+    assert resolve_static_file("linked.txt") is None
+
+
+def test_resolve_static_file_allows_a_symlink_that_stays_inside_the_build(dist_dir):
+    (dist_dir / "real.txt").write_text("fine")
+    (dist_dir / "alias.txt").symlink_to(dist_dir / "real.txt")
+
+    assert resolve_static_file("alias.txt") == (dist_dir / "real.txt").resolve()

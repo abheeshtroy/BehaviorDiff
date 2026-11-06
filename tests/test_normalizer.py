@@ -285,3 +285,59 @@ def test_detect_instability_single_run_returns_empty_set() -> None:
     config = _config()
 
     assert detect_instability([{"status": "ok"}], config) == set()
+
+
+# -- traversal order ----------------------------------------------------------
+
+
+def test_uuid_placeholders_do_not_depend_on_key_order() -> None:
+    """The same body must normalize the same way whichever order it arrives in.
+
+    A JSON object has no meaningful key order, and two versions of an app can
+    serialize one differently, so placeholder numbering must not follow the
+    order the keys happened to be in.
+    """
+    normalizer = Normalizer(_config())
+    base = {
+        "cart_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+        "order": {"id": "11111111-1111-1111-1111-111111111111"},
+    }
+    reordered = {
+        "order": {"id": "22222222-2222-2222-2222-222222222222"},
+        "cart_id": "44444444-4444-4444-4444-444444444444",
+    }
+
+    first, _ = Normalizer(_config()).normalize(base)
+    second, _ = Normalizer(_config()).normalize(reordered)
+
+    assert first == second
+
+
+def test_placeholders_are_numbered_in_sorted_key_order() -> None:
+    normalizer = Normalizer(_config())
+
+    normalized, _ = normalizer.normalize(
+        {
+            "b": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+            "a": "11111111-1111-1111-1111-111111111111",
+        }
+    )
+
+    assert normalized == {"a": "uuid-0", "b": "uuid-1"}
+
+
+def test_list_order_still_counts_as_a_difference() -> None:
+    """Lists are ordered data: only dict keys are walked in sorted order."""
+    in_order, _ = Normalizer(_config()).normalize({"tags": ["a", "b"]})
+    swapped, _ = Normalizer(_config()).normalize({"tags": ["b", "a"]})
+
+    assert in_order != swapped
+
+
+def test_ignored_field_reporting_is_order_independent() -> None:
+    normalizer = Normalizer(_config(ignore_fields=["*.created_at"]))
+
+    normalized, report = normalizer.normalize({"z": 1, "created_at": "x", "a": 2})
+
+    assert normalized == {"a": 2, "z": 1}
+    assert report.ignored_fields == ["created_at"]

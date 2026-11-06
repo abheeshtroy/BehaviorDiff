@@ -179,6 +179,26 @@ def health():
     return {"status": "ok"}
 
 
+def resolve_static_file(full_path: str) -> Path | None:
+    """The built frontend file for one request path, or None if there isn't one.
+
+    full_path comes straight from the URL, so it is resolved and then checked to
+    still sit inside DIST_DIR before anything is opened. A path that climbs out
+    of the build — ``..%2F..%2Fetc%2Fpasswd``, which a client can send even
+    though a browser would normalise it away, or a symlink pointing elsewhere —
+    is not a static file: the caller falls through to the SPA shell instead of
+    reading it from the host.
+    """
+    if not full_path:
+        return None
+    dist_root = DIST_DIR.resolve()
+    candidate = (dist_root / full_path).resolve()
+    if not candidate.is_relative_to(dist_root):
+        log.warning("static_path_rejected", path=full_path, resolved=str(candidate))
+        return None
+    return candidate if candidate.is_file() else None
+
+
 # Serve React static files if the build exists
 if DIST_DIR.is_dir():
     app.mount("/assets", StaticFiles(directory=DIST_DIR / "assets"), name="assets")
@@ -186,7 +206,7 @@ if DIST_DIR.is_dir():
     @app.get("/{full_path:path}")
     def serve_spa(full_path: str):
         """Serve the React SPA for any non-API route."""
-        file_path = DIST_DIR / full_path
-        if full_path and file_path.is_file():
+        file_path = resolve_static_file(full_path)
+        if file_path is not None:
             return FileResponse(file_path)
         return FileResponse(DIST_DIR / "index.html")

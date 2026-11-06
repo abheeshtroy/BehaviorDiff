@@ -27,6 +27,7 @@ from engine.normalizer import Normalizer, is_ignored_field
 from engine.observers.http import HttpDiff
 from engine.observers.postgres import PostgresDiff, RowChange
 from engine.observers.proxy import OutboundCall, OutboundCallDiff
+from engine.structure import changed_paths, describe_paths
 
 log = structlog.get_logger(__name__)
 
@@ -44,6 +45,11 @@ class Finding(BaseModel):
     evidence_base: Any = None
     evidence_target: Any = None
     severity: FindingSeverity
+    # Where inside the evidence the values differ, when the finding came from a
+    # structured comparison (an HTTP body, a row). Empty for findings that are
+    # about a whole row appearing or disappearing, and for evidence that is not
+    # a structure at all (a status code, a header value).
+    changed_paths: list[str] = Field(default_factory=list)
 
 
 class NoiseSummary(BaseModel):
@@ -86,6 +92,10 @@ def _compare_http(diff: HttpDiff, config: NormalizeConfig) -> Finding | None:
     normalized_base_body = _normalize_independently(diff.base.body, config)
     normalized_target_body = _normalize_independently(diff.target.body, config)
     body_changed = normalized_base_body != normalized_target_body
+    # Computed from the normalized bodies, not the raw ones: a path that only
+    # differs because of an ignored field, a UUID placeholder, or numeric
+    # jitter is suppressed here exactly as it is in the finding itself.
+    body_paths = changed_paths(normalized_base_body, normalized_target_body) if body_changed else []
 
     # A header is a field like any other, so the manifest's ignore rules apply
     # to it under the path "headers.<name>". Without this, a volatile header
@@ -103,7 +113,8 @@ def _compare_http(diff: HttpDiff, config: NormalizeConfig) -> Finding | None:
     if diff.status_changed:
         parts.append(f"status {diff.base.status_code} -> {diff.target.status_code}")
     if body_changed:
-        parts.append("body changed")
+        located = describe_paths(body_paths)
+        parts.append(f"body changed at {located}" if located else "body changed")
     if changed_headers:
         parts.append(f"headers changed: {', '.join(changed_headers)}")
 
@@ -115,6 +126,7 @@ def _compare_http(diff: HttpDiff, config: NormalizeConfig) -> Finding | None:
         evidence_base=diff.base.model_dump(),
         evidence_target=diff.target.model_dump(),
         severity="changed",
+        changed_paths=body_paths,
     )
 
 
@@ -124,12 +136,22 @@ def _compare_postgres_modified(table: str, row_change: RowChange, config: Normal
     if normalized_before == normalized_after:
         return None
 
+    # Which columns moved, named the same way the row is: normalized values
+    # decide, so a column that differs only by ignored noise is not listed.
+    paths = changed_paths(normalized_before, normalized_after)
+    located = describe_paths(paths)
+
     return Finding(
         category="postgres",
-        summary=f"row modified in {table} (pk={row_change.primary_key})",
+        summary=(
+            f"row modified in {table} (pk={row_change.primary_key}): {located}"
+            if located
+            else f"row modified in {table} (pk={row_change.primary_key})"
+        ),
         evidence_base=row_change.before,
         evidence_target=row_change.after,
         severity="changed",
+        changed_paths=paths,
     )
 
 

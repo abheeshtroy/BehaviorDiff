@@ -91,7 +91,9 @@ class Normalizer:
     UUID placeholders are assigned in order of first appearance and held for
     the lifetime of this Normalizer instance, so the same UUID maps to the
     same placeholder across multiple normalize() calls within one run (e.g.
-    a cart_id threaded through several workflow steps). Call reset(), or
+    a cart_id threaded through several workflow steps). Dict keys are traversed
+    in sorted order rather than the order they were serialized in, so the same
+    structure always produces the same placeholders. Call reset(), or
     construct a new Normalizer, to start a fresh run.
     """
 
@@ -119,7 +121,14 @@ class Normalizer:
     def _walk(self, value: Any, path: str, report: NormalizationReport) -> Any:
         if isinstance(value, dict):
             result: dict[str, Any] = {}
-            for key, child in value.items():
+            # Keys are walked in a fixed order, not in the order they arrived.
+            # Placeholders are handed out by traversal order ("first UUID seen
+            # on this side"), and a JSON object carries no meaningful key order:
+            # two versions can serialize the same body differently, and reading
+            # the rows back from a database can too. Traversing in one fixed
+            # order makes the same body map to the same placeholders either way.
+            for key in sorted(value, key=str):
+                child = value[key]
                 child_path = _join(path, key)
                 if _matches_any(child_path, self.config.ignore_fields):
                     report.ignored_fields.append(child_path)

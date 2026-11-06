@@ -168,10 +168,16 @@ def test_capture_missing_field_raises_runner_error() -> None:
 
 
 def test_capture_expression_must_start_with_dollar_dot() -> None:
-    workflow = Workflow(
-        name="wf",
-        steps=[WorkflowStep(method="GET", path="/api/carts/1", body=None, capture={"cart_id": "cart_id"})],
+    """The manifest rejects this up front; the runner keeps its own guard.
+
+    A step assembled without validation — model_construct, as a manifest
+    written against an older schema could be — must still not be walked: the
+    runner raises rather than silently capturing nothing.
+    """
+    step = WorkflowStep.model_construct(
+        method="GET", path="/api/carts/1", body=None, capture={"cart_id": "cart_id"}
     )
+    workflow = Workflow.model_construct(name="wf", steps=[step])
     client = _mock_client([_response(json_body={"cart_id": 1}), _response(json_body={"cart_id": 1})])
 
     with pytest.raises(RunnerError, match=r"\$\."):
