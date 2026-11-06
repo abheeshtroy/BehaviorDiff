@@ -324,3 +324,169 @@ def test_metadata_is_carried_through_to_result() -> None:
     assert result.metadata.total_workflows == 3
     assert result.metadata.total_steps == 7
     assert result.metadata.duration_seconds == 12.5
+
+
+# -- findings name where the change is -----------------------------------------
+
+
+def test_http_body_change_names_the_field_that_moved() -> None:
+    workflow_result = _workflow_result(
+        "checkout",
+        method="POST",
+        path="/api/checkout",
+        base=_capture(body={"total": 1999, "status": "ok"}),
+        target=_capture(body={"total": 1799, "status": "ok"}),
+    )
+
+    result = compare(
+        http_diffs=_http_diffs(workflow_result),
+        postgres_diff=None,
+        outbound_diff=None,
+        normalize_config=_config(),
+        **_metadata_kwargs(),
+    )
+
+    [finding] = result.findings
+    assert "body changed at total" in finding.summary
+    assert "status" not in finding.summary
+    assert finding.changed_paths == ["total"]
+
+
+def test_http_body_change_names_nested_and_list_paths() -> None:
+    workflow_result = _workflow_result(
+        "wf",
+        base=_capture(body={"items": [{"sku": "SHOE-42", "qty": 1}], "meta": {"note": "a"}}),
+        target=_capture(body={"items": [{"sku": "SHOE-42", "qty": 3}], "meta": {"note": "b"}}),
+    )
+
+    result = compare(
+        http_diffs=_http_diffs(workflow_result),
+        postgres_diff=None,
+        outbound_diff=None,
+        normalize_config=_config(),
+        **_metadata_kwargs(),
+    )
+
+    [finding] = result.findings
+    assert finding.changed_paths == ["items[0].qty", "meta.note"]
+    assert "body changed at items[0].qty, meta.note" in finding.summary
+
+
+def test_body_paths_exclude_fields_the_manifest_ignores() -> None:
+    workflow_result = _workflow_result(
+        "wf",
+        base=_capture(body={"total": 1999, "created_at": "2026-01-01T00:00:00Z"}),
+        target=_capture(body={"total": 1799, "created_at": "2026-01-02T00:00:00Z"}),
+    )
+
+    result = compare(
+        http_diffs=_http_diffs(workflow_result),
+        postgres_diff=None,
+        outbound_diff=None,
+        normalize_config=_config(ignore_fields=["*.created_at"]),
+        **_metadata_kwargs(),
+    )
+
+    [finding] = result.findings
+    assert finding.changed_paths == ["total"]
+    assert "created_at" not in finding.summary
+
+
+def test_whole_body_replacement_is_reported_without_a_field_name() -> None:
+    workflow_result = _workflow_result(
+        "wf", base=_capture(body={"data": {"ok": True}}), target=_capture(body=["not", "an", "object"])
+    )
+
+    result = compare(
+        http_diffs=_http_diffs(workflow_result),
+        postgres_diff=None,
+        outbound_diff=None,
+        normalize_config=_config(),
+        **_metadata_kwargs(),
+    )
+
+    [finding] = result.findings
+    assert "body changed at the whole value" in finding.summary
+    assert finding.changed_paths == [""]
+
+
+def test_uuid_placeholders_do_not_depend_on_key_order() -> None:
+    """Same body, different key order, different UUIDs: not a change.
+
+    Placeholders are handed out in traversal order, so walking dict keys in the
+    order they happen to be serialized used to swap uuid-0/uuid-1 between two
+    otherwise identical bodies and report a body change that never happened.
+    """
+    base = {
+        "cart_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+        "order": {"id": "11111111-1111-1111-1111-111111111111"},
+    }
+    target = {
+        "order": {"id": "22222222-2222-2222-2222-222222222222"},
+        "cart_id": "44444444-4444-4444-4444-444444444444",
+    }
+    workflow_result = _workflow_result("wf", base=_capture(body=base), target=_capture(body=target))
+
+    result = compare(
+        http_diffs=_http_diffs(workflow_result),
+        postgres_diff=None,
+        outbound_diff=None,
+        normalize_config=_config(),
+        **_metadata_kwargs(),
+    )
+
+    assert result.findings == []
+    assert result.noise_summary.http_suppressed == 1
+
+
+def test_http_finding_without_a_body_change_has_no_paths() -> None:
+    workflow_result = _workflow_result("wf", base=_capture(status_code=200), target=_capture(status_code=500))
+
+    result = compare(
+        http_diffs=_http_diffs(workflow_result),
+        postgres_diff=None,
+        outbound_diff=None,
+        normalize_config=_config(),
+        **_metadata_kwargs(),
+    )
+
+    [finding] = result.findings
+    assert finding.changed_paths == []
+    assert "body changed" not in finding.summary
+
+
+def test_postgres_row_change_names_the_column_that_moved() -> None:
+    before = _snapshot({"orders": [{"id": 1, "status": "pending", "total": 10}]}, {"orders": ["id"]})
+    after = _snapshot({"orders": [{"id": 1, "status": "shipped", "total": 10}]}, {"orders": ["id"]})
+    postgres_diff = PostgresObserver.diff(before, after)
+
+    result = compare(
+        http_diffs=[],
+        postgres_diff=postgres_diff,
+        outbound_diff=None,
+        normalize_config=_config(),
+        **_metadata_kwargs(),
+    )
+
+    [finding] = result.findings
+    assert finding.changed_paths == ["status"]
+    assert "row modified in orders" in finding.summary
+    assert finding.summary.endswith(": status")
+
+
+def test_postgres_inserted_row_has_no_changed_paths() -> None:
+    before = _snapshot({"orders": []}, {"orders": ["id"]})
+    after = _snapshot({"orders": [{"id": 1, "status": "pending"}]}, {"orders": ["id"]})
+    postgres_diff = PostgresObserver.diff(before, after)
+
+    result = compare(
+        http_diffs=[],
+        postgres_diff=postgres_diff,
+        outbound_diff=None,
+        normalize_config=_config(),
+        **_metadata_kwargs(),
+    )
+
+    [finding] = result.findings
+    assert finding.severity == "added"
+    assert finding.changed_paths == []
